@@ -14,37 +14,29 @@ WORKER_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ROOT_DIR = os.path.dirname(os.path.dirname(WORKER_DIR))
 sys.path.insert(0, ROOT_DIR)
 
-from core.config import TRANSLATE_TEXT_RESULT_HASH_PREFIX, HOSTING_TASKS_QUEUE, SUCCESS_QUEUE, ERROR_QUEUE
-from core.redis_client import get_redis_client
+from core.config import (
+    TRANSLATE_TEXT_RESULT_HASH_PREFIX, HOSTING_TASKS_QUEUE, SUCCESS_QUEUE, ERROR_QUEUE,
+    GEMINI_API_KEY, GEMINI_MODEL_NAME, TRANSLATION_RPS
+)
+from core.redis_client import get_redis_client, enqueue_error_result, enqueue_success_result
 from hosting.r2hosting import R2ImageHosting
 from dispatching_pipeline.mask import filter_chinese_ocr_result
 
 logger = logging.getLogger(__name__)
 
-async def enqueue_error_result(request_id: str, image_id: str, error_message: str):
-    """에러 결과를 에러 큐에 추가합니다."""
-    try:
-        redis_client = get_redis_client()
-        error_data = {
-            "request_id": request_id,
-            "image_id": image_id,
-            "error_message": error_message,
-            "timestamp": time.time()
-        }
-        error_json = json.dumps(error_data).encode('utf-8')
-        await redis_client.rpush(ERROR_QUEUE, error_json)
-        logger.info(f"[{request_id}] Error result enqueued to {ERROR_QUEUE}: {error_message}")
-    except Exception as e:
-        logger.error(f"[{request_id}] Failed to enqueue error result: {e}", exc_info=True)
 
-# API 키 (환경 변수 사용 권장)
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+
+# API 키 검증
 if not GEMINI_API_KEY:
     logger.critical("GEMINI_API_KEY 환경 변수가 설정되지 않았습니다.")
     raise ValueError("API 키가 필요합니다.")
 
 # Gemini API 엔드포인트
-API_URL = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_API_KEY}"
+API_URL = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL_NAME}:generateContent?key={GEMINI_API_KEY}"
+
+# Rate limit 관리용 변수
+_last_request_time = 0
+_rate_limit_lock = asyncio.Lock()
 
 # JSON 응답 스키마 정의 (문자열 배열)
 TRANSLATION_LIST_SCHEMA = {
@@ -57,6 +49,26 @@ TRANSLATION_LIST_SCHEMA = {
 
 # R2 호스팅 인스턴스 생성
 r2_hosting = R2ImageHosting()
+
+async def wait_for_rate_limit(request_id: str = "N/A"):
+    """
+    초당 요청 수 제한에 따라 API 호출을 제어합니다.
+    """
+    async with _rate_limit_lock:
+        global _last_request_time
+        current_time = time.time()
+        
+        # 마지막 요청 이후 경과 시간 계산
+        time_since_last = current_time - _last_request_time
+        min_interval = 1.0 / TRANSLATION_RPS  # 요청 간 최소 간격
+        
+        if time_since_last < min_interval:
+            wait_time = min_interval - time_since_last
+            logger.info(f"[{request_id}] Rate limit: waiting {wait_time:.2f}s (RPS: {TRANSLATION_RPS})")
+            await asyncio.sleep(wait_time)
+        
+        _last_request_time = time.time()
+        logger.debug(f"[{request_id}] Rate limit check passed (RPS: {TRANSLATION_RPS})")
 
 async def call_gemini_translate_list(texts_to_translate: List[str], request_id: str = "N/A") -> List[str]:
     """
@@ -199,6 +211,9 @@ async def call_translation_api(texts: List[str], request_id: str) -> List[str]:
     max_retries = 1
     for attempt in range(max_retries + 1):
         try:
+            # Rate limit 적용
+            await wait_for_rate_limit(request_id)
+            
             translated_texts = await call_gemini_translate_list(
                 texts_to_translate=texts,
                 request_id=request_id
@@ -300,25 +315,13 @@ async def process_and_save_translation(task_data: dict, image_url: str, result_c
                     logger.debug(f"[{request_id}] Translation saved to internal storage")
                     # 내부 저장소의 save_translation_result가 자동으로 렌더링 확인 및 트리거
             else:
-                # 번역할 텍스트가 없는 경우 - 호스팅 큐로 바로 전송
-                hosting_task = {
-                    "request_id": request_id,
-                    "image_id": image_id,
-                    "image_url": image_url  # 원본 URL 그대로 전송
-                }
-                redis_client = get_redis_client()
-                await redis_client.rpush(HOSTING_TASKS_QUEUE, json.dumps(hosting_task).encode('utf-8'))
-                logger.info(f"[{request_id}] No texts to translate, forwarded to hosting queue")
+                # 번역할 텍스트가 없는 경우 - 성공 큐로 바로 전송
+                await enqueue_success_result(request_id, image_id, image_url)
+                logger.info(f"[{request_id}] No texts to translate, forwarded to success queue")
         else:
-            # 필터링된 결과가 없는 경우 - 호스팅 큐로 바로 전송
-            hosting_task = {
-                "request_id": request_id,
-                "image_id": image_id,
-                "image_url": image_url  # 원본 URL 그대로 전송
-            }
-            redis_client = get_redis_client()
-            await redis_client.rpush(HOSTING_TASKS_QUEUE, json.dumps(hosting_task).encode('utf-8'))
-            logger.info(f"[{request_id}] No Chinese text found, forwarded to hosting queue")
+            # 필터링된 결과가 없는 경우 - 성공 큐로 바로 전송
+            await enqueue_success_result(request_id, image_id, image_url)
+            logger.info(f"[{request_id}] No Chinese text found, forwarded to success queue")
             
     except Exception as e:
         logger.error(f"[{request_id}] Error in translation process: {e}", exc_info=True)

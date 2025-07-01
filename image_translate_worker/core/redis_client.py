@@ -1,9 +1,10 @@
 import redis.asyncio as redis
 import json
+import time
 import logging
 from typing import Dict, Any, Tuple, Optional
 
-from core.config import REDIS_URL
+from core.config import REDIS_URL, SUCCESS_QUEUE, ERROR_QUEUE
 
 logger = logging.getLogger(__name__)
 
@@ -34,5 +35,36 @@ async def close_redis():
         await _redis_client.close()
         logger.info("Redis connection closed.")
 
-# 제거 또는 주석 처리: 기존 get_final_result
-# async def get_final_result(request_id: str) -> Any | None: ...
+async def enqueue_error_result(request_id: str, image_id: str, error_message: str):
+    """에러 결과를 에러 큐에 추가합니다."""
+    try:
+        redis_client = get_redis_client()
+        error_data = {
+            "request_id": request_id,
+            "image_id": image_id,
+            "error_message": error_message,
+            "timestamp": time.time()
+        }
+        error_json = json.dumps(error_data).encode('utf-8')
+        await redis_client.rpush(ERROR_QUEUE, error_json)
+        logger.info(f"[{request_id}] Error result enqueued to {ERROR_QUEUE}: {error_message}")
+    except Exception as e:
+        logger.error(f"[{request_id}] Failed to enqueue error result: {e}", exc_info=True)
+
+async def enqueue_success_result(request_id: str, image_id: str, image_url: str, queue_name: str = SUCCESS_QUEUE):
+    """성공 결과를 지정된 큐에 추가합니다."""
+    try:
+        redis_client = get_redis_client()
+        success_data = {
+            "request_id": request_id,
+            "image_id": image_id,
+            "image_url": image_url,
+            "timestamp": time.time()
+        }
+        success_json = json.dumps(success_data).encode('utf-8')
+        await redis_client.rpush(queue_name, success_json)
+        logger.info(f"[{request_id}] Success result enqueued to {queue_name}: {image_url}")
+    except Exception as e:
+        logger.error(f"[{request_id}] Failed to enqueue success result: {e}", exc_info=True)
+
+

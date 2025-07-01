@@ -34,7 +34,7 @@ from core.config import (
     JPEG_QUALITY,
     MAX_CONCURRENT_TASKS
 )
-from core.redis_client import initialize_redis, close_redis, get_redis_client
+from core.redis_client import initialize_redis, close_redis, get_redis_client, enqueue_error_result, enqueue_success_result
 from core.image_downloader import download_image_async
 from dispatching_pipeline.mask import filter_chinese_ocr_result, generate_mask_pure_sync
 from dispatching_pipeline.text_translate import process_and_save_translation
@@ -49,20 +49,7 @@ logging.getLogger('asyncio').setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
 
-async def enqueue_error_result(request_id: str, image_id: str, error_message: str):
-    """에러 결과를 에러 큐에 추가합니다."""
-    try:
-        redis_client = get_redis_client()
-        error_data = {
-            "request_id": request_id,
-            "image_id": image_id,
-            "error_message": error_message,
-            "timestamp": time.time()
-        }
-        await redis_client.rpush(ERROR_QUEUE, json.dumps(error_data).encode('utf-8'))
-        logger.info(f"[{request_id}] Error result enqueued to {ERROR_QUEUE}: {error_message}")
-    except Exception as e:
-        logger.error(f"[{request_id}] Failed to enqueue error result: {e}", exc_info=True)
+
 
 
 class AsyncInpaintingWorker:
@@ -173,8 +160,7 @@ class AsyncInpaintingWorker:
                     is_long,
                     self.r2_hosting
                 )
-                hosting_task = {"request_id": request_id, "image_id": image_id, "image_url": final_url or image_url}
-                await get_redis_client().rpush(HOSTING_TASKS_QUEUE, json.dumps(hosting_task).encode('utf-8'))
+                await enqueue_success_result(request_id, image_id, final_url or image_url)
                 return
                 
             # 마스크 생성 (래퍼 함수 없이 직접 호출)

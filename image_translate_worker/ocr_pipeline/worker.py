@@ -66,7 +66,7 @@ class OcrProcessor:
                 use_gpu=True,
                 use_fp16=True,
                 show_log=True,
-                gpu_mem=500,
+                gpu_mem=1000,
                 precision='fp32',
                 max_batch_size=10
             )

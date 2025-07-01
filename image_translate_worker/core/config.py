@@ -11,6 +11,11 @@ LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
 # === Translation 설정 ===
 TRANSLATE_TEXT_RESULT_HASH_PREFIX = "itp_tr_"
 
+# Gemini API 설정
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+GEMINI_MODEL_NAME = os.environ.get("GEMINI_MODEL_NAME", "gemini-2.0-flash")
+TRANSLATION_RPS = float(os.environ.get("TRANSLATION_RPS", "1.0"))  # 초당 요청 수
+
 # === Worker 공통 설정 ===
 # CPU 집약적 작업을 처리할 스레드 수 (시스템 코어 수에 맞춰 조절)
 CPU_WORKER_COUNT = int(os.environ.get("CPU_WORKER_COUNT", "16"))

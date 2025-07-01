@@ -19,7 +19,7 @@ from core.config import (
     RESIZE_TARGET_SIZE,
     FONT_PATH
 )
-from core.redis_client import get_redis_client
+from core.redis_client import get_redis_client, enqueue_error_result, enqueue_success_result
 from hosting.r2hosting import R2ImageHosting
 
 # 렌더링 관련 모듈 임포트
@@ -29,21 +29,7 @@ from rendering_pipeline.modules.textsize import TextSizeCalculator
 # 로깅 설정
 logger = logging.getLogger(__name__)
 
-async def enqueue_error_result(request_id: str, image_id: str, error_message: str):
-    """에러 결과를 에러 큐에 추가합니다."""
-    try:
-        redis_client = get_redis_client()
-        error_data = {
-            "request_id": request_id,
-            "image_id": image_id,
-            "error_message": error_message,
-            "timestamp": time.time()
-        }
-        error_json = json.dumps(error_data).encode('utf-8')
-        await redis_client.rpush(ERROR_QUEUE, error_json)
-        logger.info(f"[{request_id}] Error result enqueued to {ERROR_QUEUE}: {error_message}")
-    except Exception as e:
-        logger.error(f"[{request_id}] Failed to enqueue error result: {e}", exc_info=True)
+
 
 class RenderingProcessor:
     """
@@ -223,18 +209,12 @@ class RenderingProcessor:
             asyncio.run_coroutine_threadsafe(coro, self.main_loop)
 
     async def _send_to_hosting_queue(self, request_id: str, image_id: str, image_url: str):
-        """호스팅 큐에 최종 결과 전송"""
+        """성공 큐에 최종 결과 전송"""
         try:
-            redis_client = get_redis_client()
-            hosting_task = {
-                "request_id": request_id,
-                "image_id": image_id,
-                "image_url": image_url
-            }
-            await redis_client.rpush(HOSTING_TASKS_QUEUE, json.dumps(hosting_task).encode('utf-8'))
-            logger.info(f"[{request_id}] Final result sent to hosting queue: {image_url}")
+            await enqueue_success_result(request_id, image_id, image_url)
+            logger.info(f"[{request_id}] Final result sent to success queue: {image_url}")
         except Exception as e:
-            logger.error(f"[{request_id}] Failed to send to hosting queue: {e}", exc_info=True)
+            logger.error(f"[{request_id}] Failed to send to success queue: {e}", exc_info=True)
 
     def _scale_bounding_boxes(self, translate_data: dict, width_scale: float, height_scale: float) -> dict:
         """바운딩 박스 좌표를 주어진 비율로 스케일링합니다."""
