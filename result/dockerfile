@@ -1,0 +1,29 @@
+FROM python:3.9-slim
+
+WORKDIR /app
+
+# 필수 패키지 설치
+RUN apt-get update && apt-get install -y \
+    libgl1-mesa-glx \
+    libglib2.0-0 \
+    && rm -rf /var/lib/apt/lists/*
+
+# 환경 변수 설정
+ENV PYTHONPATH=/app
+ENV OUTPUT_DIR=/app/output/translated
+
+# Python 패키지 설치
+COPY requirements.txt /app/requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
+
+# 애플리케이션 코드 복사
+COPY . /app/
+
+# 출력 디렉토리 생성
+RUN mkdir -p /app/output/translated
+
+# 볼륨 설정 (호스트에서 마운트 가능)
+VOLUME ["/app/output"]
+
+# 서비스 실행
+CMD ["python", "returner.py"]

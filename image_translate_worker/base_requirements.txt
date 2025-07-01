@@ -1,0 +1,16 @@
+# PaddlePaddle (GPU for cuDNN 9)
+paddlepaddle-gpu==3.1.0
+
+# 기타 라이브러리
+onnxruntime-gpu
+numpy==1.26.4
+tqdm
+# opencv-python은 paddleocr 의존성으로 자동 설치
+redis
+aioredis==2.0.1
+boto3==1.26.0
+scikit-learn==1.4.2
+scipy==1.13.0
+requests>=2.28.0
+paddleocr==2.7.3
+aiohttp

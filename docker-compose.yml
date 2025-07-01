@@ -1,0 +1,51 @@
+version: '3.8'
+
+services:
+  redis:
+    image: redis:alpine
+    ports:
+      - "6380:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+
+  # 새로운 통합 파이프라인 워커
+  image_translate_worker:
+    build:
+      context: ./image_translate_worker
+      dockerfile: Dockerfile
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - PYTHONUNBUFFERED=1
+    env_file:
+      - .env
+    ipc: host # 공유 메모리 사용을 위해 필요
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  result_worker:
+    build:
+      context: ./result
+      dockerfile: dockerfile
+    volumes:
+      - ./output:/app/output/translated
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - LOG_LEVEL=INFO
+      - HOSTING_TASKS_QUEUE=img:translate:success
+    depends_on:
+      - redis
+    ipc: host
+
+volumes:
+  redis_data:
+
+# Optional: Define a network if needed, otherwise docker-compose uses a default one
+# networks:
+#   app_network:
+#     driver: bridge
