@@ -13,11 +13,9 @@ import aiohttp
 from PIL import Image, ImageDraw, ImageFont
 
 from core.config import (
-    HOSTING_TASKS_QUEUE,
-    SUCCESS_QUEUE,
-    ERROR_QUEUE,
     RESIZE_TARGET_SIZE,
-    FONT_PATH
+    FONT_PATH,
+    JPEG_QUALITY2
 )
 from core.redis_client import get_redis_client, enqueue_error_result, enqueue_success_result
 from hosting.r2hosting import R2ImageHosting
@@ -182,7 +180,7 @@ class RenderingProcessor:
                 image_id=final_image_id,
                 sub_path=f'translated_image/{current_date}/{product_id}',
                 file_ext='.jpg',
-                quality=90,
+                quality=JPEG_QUALITY2,
                 metadata={
                     "request_id": request_id,
                     "image_id": image_id

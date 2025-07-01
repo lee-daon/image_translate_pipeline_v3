@@ -2,7 +2,6 @@ import redis.asyncio as redis
 import json
 import time
 import logging
-from typing import Dict, Any, Tuple, Optional
 
 from core.config import REDIS_URL, SUCCESS_QUEUE, ERROR_QUEUE
 

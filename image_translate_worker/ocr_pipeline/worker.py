@@ -9,6 +9,11 @@ import numpy as np
 from paddleocr import PaddleOCR
 from PIL import Image, ImageFile
 
+# config import 추가
+import sys
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from core.config import OCR_DET_MODEL_DIR, OCR_REC_MODEL_DIR, OCR_SHOW_LOG
+
 # 잘린 이미지 파일도 로드할 수 있도록 허용
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
@@ -47,16 +52,24 @@ class OcrProcessor:
     def _load_model_sync(self):
         """[동기] PaddleOCR 모델을 로드하는 내부 함수."""
         try:
+            # 모델 디렉토리 설정 (config에서 가져옴)
+            det_model_dir = OCR_DET_MODEL_DIR
+            rec_model_dir = OCR_REC_MODEL_DIR
+            
+            # 디렉토리가 없으면 생성
+            os.makedirs(det_model_dir, exist_ok=True)
+            os.makedirs(rec_model_dir, exist_ok=True)
+            
             self.ocr_model = PaddleOCR(
                 det_algorithm="DB",
-                det_model_dir="/root/.paddleocr/whl/det/ch/ch_PP-OCRv4_det_infer",
+                det_model_dir=det_model_dir,
                 det_max_side_len=1504,
                 det_db_thresh=0.3,
                 det_db_box_thresh=0.5,
                 det_db_unclip_ratio=2.0,
                 use_dilation=False,
                 rec_algorithm="SVTR_LCNet",
-                rec_model_dir="/root/.paddleocr/whl/rec/ch/ch_PP-OCRv3_rec_infer",
+                rec_model_dir=rec_model_dir,
                 rec_image_shape='3, 64, 480',
                 rec_char_type='ch',
                 max_text_length=25,
@@ -65,7 +78,7 @@ class OcrProcessor:
                 lang="ch",
                 use_gpu=True,
                 use_fp16=True,
-                show_log=True,
+                show_log=OCR_SHOW_LOG,  # config에서 설정
                 gpu_mem=1000,
                 precision='fp32',
                 max_batch_size=10

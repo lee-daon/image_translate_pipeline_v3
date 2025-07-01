@@ -6,11 +6,6 @@ REDIS_URL = os.environ.get("REDIS_URL")
 # 로깅 설정
 LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
 
-# === Shared Memory 설정 ===
-
-# === Translation 설정 ===
-TRANSLATE_TEXT_RESULT_HASH_PREFIX = "itp_tr_"
-
 # Gemini API 설정
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 GEMINI_MODEL_NAME = os.environ.get("GEMINI_MODEL_NAME", "gemini-2.0-flash")
@@ -28,7 +23,6 @@ PROCESSOR_TASK_QUEUE = "img:translate:tasks"
 # 성공/에러 결과를 전달하는 큐
 SUCCESS_QUEUE = "img:translate:success"
 ERROR_QUEUE = "img:translate:error"
-HOSTING_TASKS_QUEUE = SUCCESS_QUEUE # 레거시 호환성을 위한 별칭
 
 # 텍스트 영역 주변 패딩 픽셀 수
 MASK_PADDING_PIXELS = int(os.environ.get("MASK_PADDING_PIXELS", "1"))
@@ -41,8 +35,17 @@ INPAINTER_GPU_BATCH_SIZE = int(os.environ.get("INPAINTER_GPU_BATCH_SIZE", "4"))
 # 배치가 다 차지 않았을 때, 처리를 시작하기까지 대기하는 최대 시간 (초)
 WORKER_BATCH_MAX_WAIT_TIME_SECONDS = float(os.environ.get("WORKER_BATCH_MAX_WAIT_TIME_SECONDS", "5.0"))
 
-# === 이미지 처리 설정 (from OCR Worker) ===
+# webp->jpeg 변환 품질
 JPEG_QUALITY = int(os.environ.get("JPEG_QUALITY", "95"))  # JPEG 변환 품질
+
+# 이미지 호스팅 품질
+JPEG_QUALITY2 = int(os.environ.get("JPEG_QUALITY2", "95"))
+
+# === OCR 모델 설정 ===
+OCR_MODELS_DIR = "/app/models"
+OCR_DET_MODEL_DIR = "/app/models/ch_PP-OCRv4_det_infer"
+OCR_REC_MODEL_DIR = "/app/models/ch_PP-OCRv4_rec_infer"
+OCR_SHOW_LOG = True
 
 # === Rendering Pipeline 설정 ===
 # 폰트 파일 경로

@@ -7,8 +7,6 @@ import os
 import cv2
 import numpy as np
 
-from core.config import HOSTING_TASKS_QUEUE
-
 # 로깅 설정
 logger = logging.getLogger(__name__)
 

@@ -15,10 +15,9 @@ ROOT_DIR = os.path.dirname(os.path.dirname(WORKER_DIR))
 sys.path.insert(0, ROOT_DIR)
 
 from core.config import (
-    TRANSLATE_TEXT_RESULT_HASH_PREFIX, HOSTING_TASKS_QUEUE, SUCCESS_QUEUE, ERROR_QUEUE,
     GEMINI_API_KEY, GEMINI_MODEL_NAME, TRANSLATION_RPS
 )
-from core.redis_client import get_redis_client, enqueue_error_result, enqueue_success_result
+from core.redis_client import enqueue_error_result, enqueue_success_result
 from hosting.r2hosting import R2ImageHosting
 from dispatching_pipeline.mask import filter_chinese_ocr_result
 

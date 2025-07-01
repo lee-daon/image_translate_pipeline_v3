@@ -6,7 +6,6 @@ import os
 import cv2
 import numpy as np
 from concurrent.futures import as_completed
-import threading
 
 # 파이프라인 전반에 사용할 로거 설정
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
