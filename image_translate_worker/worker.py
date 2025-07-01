@@ -29,9 +29,11 @@ from core.config import (
     PROCESSOR_TASK_QUEUE,
     CPU_WORKER_COUNT,
     JPEG_QUALITY,
-    MAX_CONCURRENT_TASKS
+    MAX_CONCURRENT_TASKS,
+    MAX_PENDING_TASKS,
+    SHUTDOWN_MAX_WAIT_SECONDS
 )
-from core.redis_client import initialize_redis, close_redis, get_redis_client, enqueue_error_result, enqueue_success_result
+from core.redis_client import initialize_redis, close_redis, get_redis_client, enqueue_error_result, enqueue_success_result, set_task_completion_callback
 from core.image_downloader import download_image_async
 from dispatching_pipeline.mask import filter_chinese_ocr_result, generate_mask_pure_sync
 from dispatching_pipeline.text_translate import process_and_save_translation
@@ -45,9 +47,16 @@ logging.basicConfig(level=LOG_LEVEL, format='%(asctime)s - %(name)s - %(levelnam
 logging.getLogger('asyncio').setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
+# === 전역 작업 카운터 (서버 안정화용) ===
+pending_tasks_count_8473 = 0
+tasks_count_lock_8473 = asyncio.Lock()
 
-
-
+async def _decrease_pending_count():
+    """전역 작업 카운터를 감소시킵니다"""
+    global pending_tasks_count_8473
+    async with tasks_count_lock_8473:
+        pending_tasks_count_8473 -= 1
+    logger.debug(f"Task completed, pending count: {pending_tasks_count_8473}")
 
 class AsyncInpaintingWorker:
     """inpainting_pipeline과 내부 메모리를 사용하는 통합 비동기 워커"""
@@ -182,17 +191,36 @@ class AsyncInpaintingWorker:
             logger.error(f"[{request_id}] Error in task processing: {e}", exc_info=True)
             await enqueue_error_result(request_id, image_id, f"Task processing error: {str(e)}")
         finally:
+            # 예외가 발생하더라도 카운터는 감소되어야 함 (단, enqueue_error_result에서 이미 감소시킨 경우 제외)
+            # 하지만 enqueue 함수들이 이미 카운터를 관리하므로 여기서는 semaphore만 해제
             self.concurrent_task_semaphore.release()
 
     async def _redis_listener_worker(self, name: str):
         """Redis에서 작업을 가져와 처리"""
+        global pending_tasks_count_8473
         logger.info(f"Worker '{name}' started, listening on '{PROCESSOR_TASK_QUEUE}'.")
         while self._running:
             try:
+                # 대기 작업 수가 최대치를 넘으면 최대치 아래로 내려올 때까지 기다림
+                while True:
+                    async with tasks_count_lock_8473:
+                        current_pending = pending_tasks_count_8473
+                    if current_pending < MAX_PENDING_TASKS:
+                        break
+                    logger.warning(f"Too many pending tasks ({current_pending}), waiting for completion...")
+                    await asyncio.sleep(1)
+                    if not self._running:
+                        return
+
                 await self.concurrent_task_semaphore.acquire()
                 task_tuple = await get_redis_client().blpop([PROCESSOR_TASK_QUEUE], timeout=1)
                 
                 if task_tuple:
+                    # 작업 카운터 증가
+                    async with tasks_count_lock_8473:
+                        pending_tasks_count_8473 += 1
+                    logger.debug(f"Task received, pending count: {pending_tasks_count_8473}")
+                    
                     task_data = json.loads(task_tuple[1].decode('utf-8'))
                     asyncio.create_task(self.process_task_from_redis(task_data))
                 else:
@@ -262,6 +290,7 @@ class AsyncInpaintingWorker:
             await enqueue_error_result(request_id, task_info['image_id'], "Result handling failed")
 
 async def main():
+    global pending_tasks_count_8473
     worker = AsyncInpaintingWorker()
     stop_event = asyncio.Event()
 
@@ -271,12 +300,41 @@ async def main():
     
     try:
         await initialize_redis()
+        
+        # Redis client에 작업 완료 콜백 설정
+        set_task_completion_callback(_decrease_pending_count)
+        
         await worker.start_workers()
         logger.info("🚀 Inpainting Worker started successfully.")
         await stop_event.wait()
 
     finally:
         logger.info("Shutting down workers...")
+        
+        # Graceful shutdown: 대기 작업이 있으면 최대 100초까지 기다림
+        async with tasks_count_lock_8473:
+            current_pending = pending_tasks_count_8473
+        
+        if current_pending == 0:
+            logger.info("No pending tasks, shutting down immediately.")
+        else:
+            logger.info(f"Waiting for {current_pending} pending tasks to complete (max {SHUTDOWN_MAX_WAIT_SECONDS}s)...")
+            
+            for i in range(SHUTDOWN_MAX_WAIT_SECONDS):
+                async with tasks_count_lock_8473:
+                    current_pending = pending_tasks_count_8473
+                
+                if current_pending == 0:
+                    logger.info(f"All pending tasks completed after {i+1}s.")
+                    break
+                    
+                await asyncio.sleep(1)
+                
+                if (i + 1) % 10 == 0:  # 10초마다 로그 출력
+                    logger.info(f"Still waiting... {current_pending} tasks pending ({i+1}s elapsed)")
+            else:
+                logger.warning(f"Shutdown timeout reached. {current_pending} tasks still pending.")
+        
         await worker.stop_workers()
         await close_redis()
         logger.info("Worker shutdown complete.")

@@ -64,3 +64,9 @@ USE_CUDA = os.environ.get("USE_CUDA", "1") == "1"
 IMAGE_DOWNLOAD_MAX_RETRIES = int(os.environ.get("IMAGE_DOWNLOAD_MAX_RETRIES", "3"))
 # 재시도 간격 (초)
 IMAGE_DOWNLOAD_RETRY_DELAY = int(os.environ.get("IMAGE_DOWNLOAD_RETRY_DELAY", "2"))
+
+# === 서버 안정화 설정 ===
+# 최대 대기 작업 수 (이 수를 넘으면 큐 처리를 일시 중단)
+MAX_PENDING_TASKS = int(os.environ.get("MAX_PENDING_TASKS", "1000"))
+# 프로세스 종료시 최대 대기 시간 (초)
+SHUTDOWN_MAX_WAIT_SECONDS = int(os.environ.get("SHUTDOWN_MAX_WAIT_SECONDS", "100"))
