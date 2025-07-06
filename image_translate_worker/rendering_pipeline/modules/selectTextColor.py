@@ -3,7 +3,7 @@ import cv2
 from typing import List, Dict, Tuple, Any, Optional
 import logging
 from collections import Counter
-from sklearn.cluster import KMeans
+from sklearn.cluster import MiniBatchKMeans
 import json
 
 
@@ -77,8 +77,8 @@ class TextColorSelector:
         # ---> 추가 끝 <---
 
         try:
-            # K-Means 클러스터링 수행 (수정: 샘플링된 픽셀 사용)
-            kmeans = KMeans(n_clusters=num_clusters, random_state=0, n_init=10)
+            # MiniBatchKMeans 클러스터링 수행 (메모리 효율성 및 속도 향상)
+            kmeans = MiniBatchKMeans(n_clusters=num_clusters, random_state=0, batch_size=256)
             # kmeans.fit(pixels) # 이전 코드
             kmeans.fit(pixels_to_cluster) # 수정된 코드
             
@@ -142,8 +142,8 @@ class TextColorSelector:
                 pixels_to_cluster = pixels
             # ---> 추가 끝 <---
 
-            # K-Means 실행 (수정: 샘플링된 픽셀 사용)
-            kmeans = KMeans(n_clusters=self.num_original_clusters, random_state=0, n_init=10)
+            # MiniBatchKMeans 실행 (메모리 효율성 및 속도 향상)
+            kmeans = MiniBatchKMeans(n_clusters=self.num_original_clusters, random_state=0, batch_size=256)
             kmeans.fit(pixels_to_cluster) # 수정된 코드
 
             # 클러스터 중심(색상 후보) 추출 및 튜플 변환

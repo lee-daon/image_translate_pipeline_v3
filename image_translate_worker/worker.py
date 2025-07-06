@@ -14,6 +14,9 @@ import cv2
 import redis
 import aiohttp
 
+# OpenCV 스레드 수 제한 (ThreadPoolExecutor와의 경합 방지)
+cv2.setNumThreads(2)
+
 # --- 경로 설정 ---
 WORKER_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, WORKER_DIR)

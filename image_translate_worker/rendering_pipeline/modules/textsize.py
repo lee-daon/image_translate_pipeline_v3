@@ -95,7 +95,7 @@ class TextSizeCalculator:
     
     def calculate_font_size(self, text: str, box: List[List[float]]) -> int:
         """
-        텍스트가 박스 안에 맞도록 Pillow를 사용하여 폰트 크기(픽셀 단위) 계산
+        텍스트가 박스 안에 맞도록 이진 검색을 사용하여 폰트 크기(픽셀 단위) 계산
         
         Args:
             text: 텍스트 내용 (단일 라인 가정)
@@ -113,50 +113,43 @@ class TextSizeCalculator:
                 logger.warning(f"Invalid input for font size calculation: text='{text}', box_width={box_width}, box_height={box_height}. Returning min font size.")
                 return self.min_font_size
 
-            # 초기 폰트 크기 설정 (박스 높이를 기준으로)
-            # 정수형 픽셀 크기로 시작
-            current_font_size = max(self.min_font_size, int(box_height * self.initial_size_ratio))
+            # 이진 검색 범위 설정
+            min_size = self.min_font_size
+            max_size = max(self.min_font_size, int(box_height * self.initial_size_ratio))
+            best_size = min_size
             
-            logger.debug(f"Calculating font size for text: '{text[:20]}...', box_width: {box_width:.2f}, box_height: {box_height:.2f}, initial_font_size: {current_font_size}")
+            logger.debug(f"Calculating font size for text: '{text[:20]}...', box_width: {box_width:.2f}, box_height: {box_height:.2f}, search_range: {min_size}-{max_size}")
 
-            while current_font_size >= self.min_font_size:
+            # 이진 검색으로 최적 폰트 크기 찾기
+            while min_size <= max_size:
+                mid_size = (min_size + max_size) // 2
+                
                 try:
                     # 현재 크기로 폰트 로드 (캐싱된 함수 사용)
-                    font = self._get_font(current_font_size)
+                    font = self._get_font(mid_size)
                     # Pillow의 getbbox 사용 (left, top, right, bottom)
-                    # textbbox는 (0,0) 기준이므로 bbox[2]가 너비, bbox[3]이 높이
                     text_bbox = font.getbbox(text)
                     text_width = text_bbox[2] - text_bbox[0] 
                     text_height = text_bbox[3] - text_bbox[1] # 실제 렌더링 높이
 
-                    # 텍스트 너비가 박스 너비 안에 들어오는지 확인
-                    # 높이는 초기 크기 설정 시 고려되었으므로 너비만 체크 (단일 라인 가정)
-                    if text_width <= box_width:
-                        logger.debug(f"Font size {current_font_size} fits.")
-                        # 가장 큰 적합한 크기 반환
-                        return current_font_size
+                    # 텍스트가 박스 안에 맞는지 확인 (너비와 높이 모두 체크)
+                    if text_width <= box_width and text_height <= box_height:
+                        best_size = mid_size  # 현재 크기 저장
+                        min_size = mid_size + 1  # 더 큰 크기 시도
+                        logger.debug(f"Font size {mid_size} fits, trying larger")
+                    else:
+                        max_size = mid_size - 1  # 더 작은 크기 시도
+                        logger.debug(f"Font size {mid_size} too large, trying smaller")
                     
                 except OSError as e:
-                    logger.error(f"Error using font '{self.font_path}' at size {current_font_size}: {e}. Trying smaller size.")
-                    # 폰트 관련 오류 시 크기 줄이기 시도
+                    logger.error(f"Error using font '{self.font_path}' at size {mid_size}: {e}. Trying smaller size.")
+                    max_size = mid_size - 1  # 폰트 오류 시 더 작은 크기 시도
                 except Exception as e:
-                    logger.error(f"Unexpected error during font size calculation at size {current_font_size}: {e}", exc_info=True)
-                    # 예기치 않은 오류 발생 시 안전하게 최소 크기 반환 또는 루프 중단
+                    logger.error(f"Unexpected error during font size calculation at size {mid_size}: {e}", exc_info=True)
                     break
 
-                # 폰트 크기 축소 (예: 1픽셀씩 또는 비율로)
-                # current_font_size -= 1 
-                new_size = int(current_font_size * 0.95) # 비율로 줄이기
-                if new_size < current_font_size: # 최소 1씩은 줄어들도록 보장
-                    current_font_size = new_size
-                else:
-                    current_font_size -= 1 # 비율 감소가 효과 없으면 1씩 줄임
-
-                # current_font_size = max(self.min_font_size, current_font_size) # 최소 크기 보장
-
-            # 루프를 빠져나왔지만 적합한 크기를 찾지 못한 경우 (매우 작은 박스 등)
-            logger.warning(f"Could not find a fitting font size for text '{text[:20]}...' within box width {box_width:.2f}. Returning minimum size {self.min_font_size}.")
-            return self.min_font_size
+            logger.debug(f"Final font size: {best_size}")
+            return best_size
             
         except Exception as e:
             logger.error(f"Error calculating font size: {str(e)}", exc_info=True)
