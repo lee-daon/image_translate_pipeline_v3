@@ -92,15 +92,11 @@ class RenderingProcessor:
             image_id = task_data["image_id"]
             translate_data = task_data["translate_data"]
             inpainted_image = task_data["inpainted_image"]
-            original_image_bytes = task_data["original_image_bytes"]
+            original_image = task_data["original_image_array"]
             is_long = task_data["is_long"]
             
-            # 원본 이미지 디코딩
-            original_img_array = np.frombuffer(original_image_bytes, dtype=np.uint8)
-            original_image = cv2.imdecode(original_img_array, cv2.IMREAD_COLOR)
-            
             if original_image is None:
-                raise ValueError("Failed to decode original image")
+                raise ValueError("Failed to get original image array")
             
             # 이미지 크기 및 스케일링 처리
             height_scale = 1.0

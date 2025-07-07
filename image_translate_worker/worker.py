@@ -77,7 +77,7 @@ class AsyncInpaintingWorker:
         self.ocr_processor: Optional[OcrProcessor] = None
         
         self.batch_lock = asyncio.Lock()
-        self.task_batch: List[Tuple[np.ndarray, np.ndarray, Dict]] = []
+        self.task_batch: List[Tuple[np.ndarray, np.ndarray, Dict, np.ndarray]] = []
         self.batch_trigger = asyncio.Event()
 
         self.r2_hosting = R2ImageHosting()
@@ -185,7 +185,7 @@ class AsyncInpaintingWorker:
             # 인페인팅 배치에 추가
             task_info = {"request_id": request_id, "image_id": image_id, "is_long": is_long}
             async with self.batch_lock:
-                self.task_batch.append((image_array, mask_array, task_info))
+                self.task_batch.append((image_array, mask_array, task_info, image_array))
             
             if len(self.task_batch) >= WORKER_COLLECT_BATCH_SIZE:
                 self.batch_trigger.set()
@@ -254,10 +254,10 @@ class AsyncInpaintingWorker:
             
             await self._process_batch(batch_to_process)
 
-    async def _process_batch(self, batch: List[Tuple[np.ndarray, np.ndarray, Dict]]):
+    async def _process_batch(self, batch: List[Tuple[np.ndarray, np.ndarray, Dict, np.ndarray]]):
         if not batch: return
 
-        images, masks, tasks_info = zip(*batch)
+        images, masks, tasks_info, original_image_arrays = zip(*batch)
         request_ids = [info['request_id'] for info in tasks_info]
         logger.info(f"Processing batch of {len(batch)} tasks. IDs: {request_ids}")
 
@@ -268,7 +268,7 @@ class AsyncInpaintingWorker:
             )
             
             result_tasks = [
-                self._handle_inpainting_result(tasks_info[idx], result_img)
+                self._handle_inpainting_result(tasks_info[idx], result_img, original_image_arrays[idx])
                 for idx, result_img in results_iterator
             ]
             await asyncio.gather(*result_tasks)
@@ -281,11 +281,15 @@ class AsyncInpaintingWorker:
             ]
             await asyncio.gather(*error_tasks)
 
-    async def _handle_inpainting_result(self, task_info: Dict, result_image: np.ndarray):
+    async def _handle_inpainting_result(self, task_info: Dict, result_image: np.ndarray, original_image_array: np.ndarray):
         """인페인팅 결과를 ResultChecker로 전달"""
         request_id = task_info["request_id"]
         try:
-            inpainting_data = {**task_info, "inpainted_image": result_image}
+            inpainting_data = {
+                **task_info, 
+                "inpainted_image": result_image,
+                "original_image_array": original_image_array
+            }
             await self.result_checker.save_inpainting_result(request_id, inpainting_data)
             logger.info(f"[{request_id}] Inpainting result (numpy array) saved and forwarded.")
         except Exception as e:
