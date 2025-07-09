@@ -110,6 +110,7 @@ class ImageResultWorker:
         
         # 로그 메시지
         source_type = "SHM" if shm_info else "URL" if image_url else "None"
+        logger.info(f"task_data: {image_url}")
         logger.info(f"[{request_id}] 파일 저장 작업 시작 - 이미지: {image_id}, 소스: {source_type}")
         
         try:
