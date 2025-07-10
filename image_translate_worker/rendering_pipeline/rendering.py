@@ -98,41 +98,45 @@ class RenderingProcessor:
             if original_image is None:
                 raise ValueError("Failed to get original image array")
             
-            # 이미지 크기 및 스케일링 처리
-            height_scale = 1.0
-            width_scale = 1.0
-            image_for_text_color_selection = original_image
-            rendered_image = inpainted_image
-            
+            # 1. 최종 출력 크기 결정
+            original_h, original_w = original_image.shape[:2]
             if not is_long:
-                # Short: 1024x1024 고정
-                original_h, original_w = inpainted_image.shape[:2]
-                target_h, target_w = RESIZE_TARGET_SIZE
-                
-                # 리사이즈
-                image_for_text_color_selection = cv2.resize(original_image, (target_w, target_h))
-                rendered_image = cv2.resize(inpainted_image, (target_w, target_h))
-                
-                if original_h > 0 and original_w > 0:
-                    height_scale = target_h / original_h
-                    width_scale = target_w / original_w
-                
-                # translate_data의 box 좌표 스케일링
-                translate_data = self._scale_bounding_boxes(translate_data, width_scale, height_scale)
-
+                target_h, target_w = RESIZE_TARGET_SIZE, RESIZE_TARGET_SIZE
             else:
-                # Long: 가로 864px 고정, 세로 비율 유지 (원본 크기와 상관없이 무조건 리사이즈)
-                original_h, original_w = inpainted_image.shape[:2]
-                target_w = 864  # 가로 864px 고정
-                scale = target_w / original_w  # 원본이 작으면 확대, 크면 축소
-                target_h = int(original_h * scale)
-                
-                # 무조건 864px로 리사이즈 (작은 이미지도 확대)
-                image_for_text_color_selection = cv2.resize(original_image, (target_w, target_h))
-                rendered_image = cv2.resize(inpainted_image, (target_w, target_h))
-                
-                # translate_data의 box 좌표 스케일링
-                translate_data = self._scale_bounding_boxes(translate_data, scale, scale)
+                target_w = 864
+                target_h = int(original_h * (target_w / original_w)) if original_w > 0 else 0
+
+            if target_h <= 0 or target_w <= 0:
+                raise ValueError(f"Invalid target size: ({target_w}, {target_h}) for original size ({original_w}, {original_h})")
+
+            # 2. 이미지 리사이즈
+            resized_original = cv2.resize(original_image, (target_w, target_h), interpolation=cv2.INTER_AREA)
+            resized_inpainted = cv2.resize(inpainted_image, (target_w, target_h), interpolation=cv2.INTER_AREA)
+            
+            # 3. 좌표 스케일링
+            height_scale = target_h / original_h if original_h > 0 else 0
+            width_scale = target_w / original_w if original_w > 0 else 0
+            translate_data = self._scale_bounding_boxes(translate_data, width_scale, height_scale)
+
+            # 4. 고품질 배경 생성: 원본(선명)을 기반으로 인페인팅(깨끗)된 부분만 합성
+            rendered_image = resized_original.copy()
+            if "translate_result" in translate_data:
+                for item in translate_data["translate_result"]:
+                    if "box" in item and item["box"]:
+                        box = np.array(item["box"], dtype=np.int32)
+                        x_min, y_min = np.min(box, axis=0)
+                        x_max, y_max = np.max(box, axis=0)
+
+                        # 좌표가 이미지 경계 내에 있도록 보정
+                        x_min, y_min = max(0, x_min), max(0, y_min)
+                        x_max, y_max = min(target_w, x_max), min(target_h, y_max)
+
+                        if x_min < x_max and y_min < y_max:
+                            clean_patch = resized_inpainted[y_min:y_max, x_min:x_max]
+                            rendered_image[y_min:y_max, x_min:x_max] = clean_patch
+            
+            # 5. 색상 선택 및 렌더링을 위한 이미지 설정
+            image_for_text_color_selection = resized_original
 
             # 폰트 크기 계산
             if self.text_size_calculator:
