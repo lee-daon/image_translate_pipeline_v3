@@ -40,7 +40,7 @@ def preprocess_image(
 
     if scale_factor > 1:
         new_w, new_h = int(w / scale_factor), int(h / scale_factor)
-        resized_img = cv2.resize(image_np, (new_w, new_h), interpolation=cv2.INTER_AREA)
+        resized_img = cv2.resize(image_np, (new_w, new_h), interpolation=cv2.INTER_NEAREST_EXACT)
     else:
         resized_img = image_np
 
