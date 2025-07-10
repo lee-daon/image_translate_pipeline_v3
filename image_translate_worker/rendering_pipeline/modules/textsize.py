@@ -63,51 +63,68 @@ class TextSizeCalculator:
                 raise
         return self.font_cache[size]
     
-    def _calculate_box_dimensions(self, box: List[List[float]]) -> Tuple[float, float]:
+    def _calculate_box_info(self, box: List[List[float]]) -> Tuple[float, float, float]:
         """
-        텍스트 박스의 너비와 높이 계산 (min/max 좌표 사용)
+        텍스트 박스의 너비, 높이, 각도 계산 (minAreaRect 사용)
         
         Args:
             box: 텍스트 박스 좌표 [[x1, y1], [x2, y2], [x3, y3], [x4, y4]]
+            
+        Returns:
+            Tuple[float, float, float]: (너비, 높이, 각도)
         """
         try:
-            # 박스 좌표를 numpy 배열로 변환
             box_points = np.array(box, dtype=np.float32)
+            _center, (width, height), angle = cv2.minAreaRect(box_points)
+
+            # 너비와 높이를 정규화하고 그에 따라 각도 조정
+            # angle은 [-90, 0) 범위의 값을 가지며, 너비(width)에 대한 각도임.
+            # 너비가 높이보다 작으면, 박스가 세로 방향이라는 의미.
+            # 이 경우, 너비와 높이를 바꾸고 각도에 90도를 더해 긴 쪽의 각도를 얻음.
+            if width < height:
+                width, height = height, width
+                angle += 90
             
-            # min/max 좌표로 너비/높이 계산
-            x_coords = box_points[:, 0]
-            y_coords = box_points[:, 1]
-            x_min, x_max = np.min(x_coords), np.max(x_coords)
-            y_min, y_max = np.min(y_coords), np.max(y_coords)
+            # 각도를 [-90, 90] 범위로 정규화하여 뒤집힌 텍스트 처리
+            if angle > 90:
+                angle -= 180
+            elif angle < -90:
+                angle += 180
+
+            # 사용자의 요청: 정규화된 각도를 ±30도로 제한하여 안정성 확보
+            if abs(angle) > 30:
+                logger.warning(f"Normalized angle {angle:.2f} is outside the allowed range [-30, 30]. "
+                               f"Resetting angle to 0 and using axis-aligned box for font size.")
+                angle = 0
+                # 각도를 0으로 리셋하는 경우, 폰트 크기 계산을 위해 축 정렬된 박스 크기를 사용
+                x_coords = box_points[:, 0]
+                y_coords = box_points[:, 1]
+                width = np.max(x_coords) - np.min(x_coords)
+                height = np.max(y_coords) - np.min(y_coords)
             
-            width = x_max - x_min
-            height = y_max - y_min
-            
-            # 너비 또는 높이가 0 이하인 경우 로깅 및 기본값 반환 방지 (calculate_font_size에서 처리)
+            # 너비 또는 높이가 0 이하인 경우 경고 로깅
             if width <= 0 or height <= 0:
                 logger.warning(f"Calculated zero or negative box dimension: width={width}, height={height} for box {box}. Calculation might fail.")
             
-            return width, height
+            return width, height, angle
         except Exception as e:
             logger.error(f"Error calculating box dimensions: {e} for box {box}", exc_info=True)
-            # 오류 발생 시 0, 0 반환하여 이후 단계에서 처리되도록 함
-            return 0.0, 0.0
+            # 오류 발생 시 0, 0, 0 반환하여 이후 단계에서 처리되도록 함
+            return 0.0, 0.0, 0.0
     
-    def calculate_font_size(self, text: str, box: List[List[float]]) -> int:
+    def calculate_font_size(self, text: str, box_width: float, box_height: float) -> int:
         """
         텍스트가 박스 안에 맞도록 이진 검색을 사용하여 폰트 크기(픽셀 단위) 계산
         
         Args:
             text: 텍스트 내용 (단일 라인 가정)
-            box: 텍스트 박스 좌표
+            box_width: 텍스트 박스의 실제 너비
+            box_height: 텍스트 박스의 실제 높이
             
         Returns:
             int: 계산된 폰트 크기 (픽셀 단위)
         """
         try:
-            # 박스 크기 계산
-            box_width, box_height = self._calculate_box_dimensions(box)
-            
             # 텍스트가 비어있거나 박스 크기가 유효하지 않으면 최소 크기 반환
             if not text or box_width <= 0 or box_height <= 0:
                 logger.warning(f"Invalid input for font size calculation: text='{text}', box_width={box_width}, box_height={box_height}. Returning min font size.")
@@ -115,6 +132,7 @@ class TextSizeCalculator:
 
             # 이진 검색 범위 설정
             min_size = self.min_font_size
+            # 박스 높이를 기준으로 최대 폰트 크기 초기화
             max_size = max(self.min_font_size, int(box_height * self.initial_size_ratio))
             best_size = min_size
             
@@ -175,16 +193,29 @@ class TextSizeCalculator:
                 text = item.get("translated_text", "")
                 
                 if not box or not text:
-                    # 박스나 텍스트가 없으면 기본 폰트 크기 사용
-                    translate_result[i]["font_size_px"] = self.min_font_size
-                    logger.warning(f"Missing box or text for item {i}. Using min font size.")
+                    # 박스나 텍스트가 없으면 기본 폰트 크기 및 정보 사용
+                    translate_result[i].update({
+                        "font_size_px": self.min_font_size,
+                        "box_width": 0,
+                        "box_height": 0,
+                        "box_angle": 0
+                    })
+                    logger.warning(f"Missing box or text for item {i}. Using min font size and default box info.")
                     continue
                 
-                # 폰트 크기 계산 (픽셀 단위)
-                font_size_px = self.calculate_font_size(text, box)
+                # 박스 정보(너비, 높이, 각도) 계산
+                box_width, box_height, box_angle = self._calculate_box_info(box)
                 
-                # 결과 데이터에 폰트 크기 정보 추가 (픽셀 단위)
-                translate_result[i]["font_size_px"] = font_size_px
+                # 폰트 크기 계산 (픽셀 단위)
+                font_size_px = self.calculate_font_size(text, box_width, box_height)
+                
+                # 결과 데이터에 폰트 크기 및 박스 정보 추가 (픽셀 단위)
+                translate_result[i].update({
+                    "font_size_px": font_size_px,
+                    "box_width": box_width,
+                    "box_height": box_height,
+                    "box_angle": box_angle
+                })
             
             # 업데이트된 번역 결과 반환
             translate_data["translate_result"] = translate_result

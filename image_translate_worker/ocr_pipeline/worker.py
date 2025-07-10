@@ -76,6 +76,7 @@ class OcrProcessor:
                 use_space_char=True,
                 drop_score=0.5,
                 lang="ch",
+                use_angle_cls=False,
                 use_gpu=True,
                 use_fp16=True,
                 show_log=OCR_SHOW_LOG,  # config에서 설정

@@ -227,21 +227,20 @@ class RenderingProcessor:
         return translate_data
 
     def _draw_texts_on_image(self, image: np.ndarray, translate_data: dict) -> np.ndarray:
-        """PIL을 사용하여 모든 텍스트를 이미지에 효율적으로 렌더링합니다."""
+        """PIL을 사용하여 모든 텍스트를 이미지에 효율적으로 렌더링합니다. (회전 지원)"""
         if not translate_data or "translate_result" not in translate_data:
             return image
 
         try:
-            # BGR -> RGB 변환을 한 번만 수행
             pil_image = Image.fromarray(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
-            draw = ImageDraw.Draw(pil_image)
-
+            
             # 텍스트 렌더링을 위한 배치 처리
             for item in translate_data["translate_result"]:
                 text = item.get("translated_text")
                 box = item.get("box")
                 text_color = item.get("text_color")
                 font_size = item.get("font_size_px", 20)
+                angle = item.get("box_angle", 0)
 
                 if not (text and box and text_color):
                     continue
@@ -250,57 +249,65 @@ class RenderingProcessor:
                 if font is None:
                     continue
                 
-                # 박스 좌표를 정수형으로 변환 (한 번만)
-                box_np = np.array(box, dtype=np.int32)
-                x_min, y_min = box_np.min(axis=0)
-                x_max, y_max = box_np.max(axis=0)
-                width = x_max - x_min
-                height = y_max - y_min
+                # 박스 중앙점 계산
+                box_np = np.array(box, dtype=np.float32)
+                center_x, center_y = np.mean(box_np, axis=0)
 
-                # RGB 색상 변환 (한 번만)
+                # RGB 색상 변환
                 rgb_text_color = (text_color.get("r", 0), text_color.get("g", 0), text_color.get("b", 0))
 
-                # 멀티라인 텍스트 처리 최적화
+                # --- 텍스트 블록 크기 계산 (멀티라인 지원) ---
                 lines = text.split('\n')
-                if len(lines) == 1:
-                    # 단일 라인 텍스트 - 빠른 경로
-                    text_bbox = draw.textbbox((0, 0), text, font=font)
-                    line_width = text_bbox[2] - text_bbox[0]
-                    line_height = text_bbox[3] - text_bbox[1]
+                
+                # Pillow 10.0.0 부터 textbbox가 draw에서 font로 이동 (getbbox)
+                # getbbox는 (left, top, right, bottom)을 반환
+                total_text_width = 0
+                total_text_height = 0
+                line_heights = []
+
+                for line in lines:
+                    try:
+                        # font.getbbox 사용
+                        line_bbox = font.getbbox(line)
+                        line_width = line_bbox[2] - line_bbox[0]
+                        line_height = line_bbox[3] - line_bbox[1]
+                    except TypeError:
+                        # 일부 오래된 Pillow 버전 호환성
+                        line_width, line_height = font.getsize(line)
+
+                    total_text_width = max(total_text_width, line_width)
+                    total_text_height += line_height
+                    line_heights.append(line_height)
+
+                # --- 임시 투명 캔버스에 텍스트 렌더링 ---
+                padding = 10  # 텍스트 잘림 방지용 패딩
+                canvas_width = total_text_width + padding * 2
+                canvas_height = total_text_height + padding * 2
+
+                txt_canvas = Image.new('RGBA', (canvas_width, canvas_height), (255, 255, 255, 0))
+                txt_draw = ImageDraw.Draw(txt_canvas)
+
+                current_y = padding
+                for i, line in enumerate(lines):
+                    try:
+                        line_bbox = font.getbbox(line)
+                        line_w = line_bbox[2] - line_bbox[0]
+                    except TypeError:
+                        line_w, _ = font.getsize(line)
                     
-                    text_x = x_min + (width - line_width) // 2
-                    text_y = y_min + (height - line_height) // 2
-                    
-                    draw.text((text_x, text_y), text, fill=rgb_text_color, font=font)
-                else:
-                    # 멀티라인 텍스트 - 기존 로직 유지하되 최적화
-                    total_text_width = 0
-                    total_text_height = 0
-                    line_heights = []
-                    line_widths = []
-
-                    # 모든 라인의 크기를 한 번에 계산
-                    for line in lines:
-                        text_bbox = draw.textbbox((0, 0), line, font=font)
-                        line_width = text_bbox[2] - text_bbox[0]
-                        line_height = text_bbox[3] - text_bbox[1]
-                        
-                        line_widths.append(line_width)
-                        line_heights.append(line_height)
-                        total_text_width = max(total_text_width, line_width)
-                        total_text_height += line_height
-
-                    # 텍스트 시작 위치 계산
-                    text_x = x_min + (width - total_text_width) // 2
-                    text_y = y_min + (height - total_text_height) // 2
-
-                    # 각 라인 렌더링
-                    current_y = text_y
-                    for i, line in enumerate(lines):
-                        # 각 라인의 중앙 정렬
-                        line_x = x_min + (width - line_widths[i]) // 2
-                        draw.text((line_x, current_y), line, fill=rgb_text_color, font=font)
-                        current_y += line_heights[i]
+                    # 각 라인 중앙 정렬
+                    line_x = (canvas_width - line_w) / 2
+                    txt_draw.text((line_x, current_y - font.getbbox(line)[1]), line, font=font, fill=rgb_text_color)
+                    current_y += line_heights[i]
+                
+                # --- 캔버스 회전 및 원본 이미지에 합성 ---
+                # Pillow는 반시계 방향으로 회전하므로, cv2에서 얻은 각도에 -1을 곱하여 방향을 맞춤
+                rotated_canvas = txt_canvas.rotate(-angle, expand=True, resample=Image.BICUBIC)
+                
+                paste_x = int(center_x - rotated_canvas.width / 2)
+                paste_y = int(center_y - rotated_canvas.height / 2)
+                
+                pil_image.paste(rotated_canvas, (paste_x, paste_y), mask=rotated_canvas)
             
             # RGB -> BGR 변환을 한 번만 수행
             return cv2.cvtColor(np.array(pil_image), cv2.COLOR_RGB2BGR)
