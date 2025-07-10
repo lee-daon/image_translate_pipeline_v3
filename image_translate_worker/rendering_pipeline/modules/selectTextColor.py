@@ -63,8 +63,8 @@ class TextColorSelector:
         num_pixels = pixels.shape[0]
 
         # ---> 추가: 픽셀 샘플링 로직 <---
-        sample_size_ratio = 0.1 # 샘플링 비율 (10%)
-        min_pixels_for_sampling = 100 # 샘플링을 위한 최소 픽셀 수
+        sample_size_ratio = 0.5 # 샘플링 비율 (10%)
+        min_pixels_for_sampling = 20 # 샘플링을 위한 최소 픽셀 수
 
         if num_pixels > min_pixels_for_sampling:
             sample_size = max(num_clusters, int(num_pixels * sample_size_ratio)) # 최소 클러스터 수만큼은 샘플링
@@ -130,8 +130,8 @@ class TextColorSelector:
             num_pixels = pixels.shape[0]
 
             # ---> 추가: 픽셀 샘플링 로직 (위 함수와 동일) <---
-            sample_size_ratio = 0.1 # 샘플링 비율 (10%)
-            min_pixels_for_sampling = 100 # 샘플링을 위한 최소 픽셀 수
+            sample_size_ratio = 0.5 # 샘플링 비율 (10%)
+            min_pixels_for_sampling = 20 # 샘플링을 위한 최소 픽셀 수
             num_target_clusters = self.num_original_clusters
 
             if num_pixels > min_pixels_for_sampling:
@@ -199,14 +199,14 @@ class TextColorSelector:
     
     def _adjust_color_for_contrast(self, text_color: Tuple[int, int, int], 
                                   bg_color: Tuple[int, int, int], 
-                                  target_ratio: float = 4.5) -> Tuple[int, int, int]:
+                                  target_ratio: float = 2.0) -> Tuple[int, int, int]:
         """
         배경색과의 대비율이 낮을 경우, 텍스트 색상을 강제로 조정 (검정/흰색)
         
         Args:
             text_color: 텍스트 색상
             bg_color: 배경색
-            target_ratio: 목표 대비율 (WCAG 1.4.3 기준은 4.5:1)
+            target_ratio: 목표 대비율 (기본값 2.0:1, 톤온톤 디자인 고려)
             
         Returns:
             Tuple[int, int, int]: 조정된 (또는 강제 지정된) 텍스트 색상 (BGR)
@@ -296,7 +296,7 @@ class TextColorSelector:
                 # 4. 최종 대비율 확인 및 강제 조정
                 final_contrast = self._calculate_contrast_ratio(chosen_text_color, inpainted_bg_color)
                 adjusted_text_color = self._adjust_color_for_contrast(
-                    chosen_text_color, inpainted_bg_color, target_ratio=4.5
+                    chosen_text_color, inpainted_bg_color, target_ratio=2.0
                 )
 
                 # 조정이 발생했다면 최종 대비율 다시 계산
