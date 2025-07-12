@@ -1,0 +1,57 @@
+version: '3.8'
+
+services:
+  # 로컬 Redis (필요시 주석 해제)
+  redis:
+    image: redis:alpine
+    ports:
+      - "6380:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    # 외부 Redis 사용시 이 서비스를 주석 처리하세요
+
+  # 새로운 통합 파이프라인 워커
+  image_translate_worker:
+    build:
+      context: ./image_translate_worker
+      dockerfile: Dockerfile
+    environment:
+        # 환경변수로 Redis URL 받기 (기본값: 로컬 Redis)
+
+      - PYTHONUNBUFFERED=1
+    env_file:
+      - .env
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    # 외부 Redis 사용시 depends_on 제거
+    depends_on:
+      - redis
+
+  result_worker:
+    build:
+      context: ./result
+      dockerfile: dockerfile
+    volumes:
+      - ./output:/app/output/translated
+    environment:
+        # 환경변수로 Redis URL 받기 (기본값: 로컬 Redis)
+      - HOSTING_TASKS_QUEUE=img:translate:success
+    env_file:
+      - .env
+    # 외부 Redis 사용시 depends_on 제거
+    depends_on:
+      - redis
+
+volumes:
+  redis_data:
+
+# Optional: Define a network if needed, otherwise docker-compose uses a default one
+# networks:
+#   app_network:
+#     driver: bridge

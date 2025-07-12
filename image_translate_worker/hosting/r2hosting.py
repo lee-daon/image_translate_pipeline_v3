@@ -6,6 +6,7 @@ import numpy as np
 import cv2
 from typing import Dict, Any, Optional
 from botocore.exceptions import ClientError
+from botocore.config import Config
 
 logger = logging.getLogger(__name__)
 
@@ -32,16 +33,24 @@ class R2ImageHosting:
         if missing_vars:
             raise ValueError(f"Missing required environment variables: {', '.join(missing_vars)}")
         
-        # S3 호환 클라이언트 생성
+        # S3 호환 클라이언트 생성 (연결 풀 크기 증가)
         try:
+            config = Config(
+                max_pool_connections=50,  # 연결 풀 크기를 50으로 증가
+                retries={'max_attempts': 3, 'mode': 'adaptive'},  # 재시도 설정
+                read_timeout=60,  # 읽기 타임아웃 60초
+                connect_timeout=10  # 연결 타임아웃 10초
+            )
+            
             self.s3_client = boto3.client(
                 's3',
                 endpoint_url=self.endpoint_url,
                 aws_access_key_id=self.access_key_id,
                 aws_secret_access_key=self.secret_access_key,
-                region_name='auto'  # R2는 'auto' 사용
+                region_name='auto',  # R2는 'auto' 사용
+                config=config
             )
-            logger.info("R2 클라이언트 초기화 완료")
+            logger.info("R2 클라이언트 초기화 완료 (연결 풀 크기: 50)")
         except Exception as e:
             logger.error(f"R2 클라이언트 초기화 실패: {e}")
             raise
