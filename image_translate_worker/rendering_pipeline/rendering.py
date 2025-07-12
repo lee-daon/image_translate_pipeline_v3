@@ -1,15 +1,11 @@
 import os
-import json
-import time
+
 import logging
 import numpy as np
 import cv2
 import asyncio
 from datetime import datetime
-from typing import Dict, Any, Tuple, List, Optional
-from functools import partial
-import redis
-import aiohttp
+from typing import Dict, Optional
 from PIL import Image, ImageDraw, ImageFont
 
 from core.config import (

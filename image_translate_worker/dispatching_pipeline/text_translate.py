@@ -7,7 +7,6 @@ import time
 from typing import List
 
 import aiohttp
-import numpy as np
 
 # 프로젝트 루트 설정
 WORKER_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

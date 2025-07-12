@@ -1,8 +1,6 @@
 import redis.asyncio as redis
 import json
-import time
 import logging
-import asyncio
 from typing import Optional, Callable, Awaitable
 
 from core.config import REDIS_URL, SUCCESS_QUEUE, ERROR_QUEUE

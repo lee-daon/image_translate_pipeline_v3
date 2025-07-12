@@ -45,7 +45,7 @@ JPEG_QUALITY2 = int(os.environ.get("JPEG_QUALITY2", "95"))
 OCR_MODELS_DIR = "/app/models"
 OCR_DET_MODEL_DIR = "/app/models/ch_PP-OCRv4_det_infer"
 OCR_REC_MODEL_DIR = "/app/models/ch_PP-OCRv4_rec_infer"
-OCR_SHOW_LOG = True
+OCR_SHOW_LOG = False
 
 # === Rendering Pipeline 설정 ===
 # 폰트 파일 경로

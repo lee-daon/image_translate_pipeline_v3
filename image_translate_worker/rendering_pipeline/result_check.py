@@ -1,11 +1,7 @@
-import json
 import logging
 import asyncio
-from typing import Dict, Any, Optional
+from typing import Dict
 import concurrent.futures
-import os
-import cv2
-import numpy as np
 
 # 로깅 설정
 logger = logging.getLogger(__name__)
