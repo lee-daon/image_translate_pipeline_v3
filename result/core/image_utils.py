@@ -30,7 +30,7 @@ class ImageUtils:
         
         logger.info(f"ImageUtils 초기화 완료 - 출력 디렉토리: {self.output_dir}")
     
-    async def download_image_from_url(self, image_url: str, request_id: str) -> Optional[np.ndarray]:
+    async def download_image_from_url(self, image_url: str) -> Optional[np.ndarray]:
         """
         URL에서 이미지 다운로드 및 디코딩
         
@@ -48,7 +48,7 @@ class ImageUtils:
             if image_url.startswith('//'):
                 image_url = 'https:' + image_url
             
-            logger.debug(f"[{request_id}] 이미지 다운로드: {image_url}")
+            logger.debug(f"이미지 다운로드: {image_url}")
             
             # aiohttp로 이미지 다운로드
             async with aiohttp.ClientSession() as session:
@@ -63,14 +63,14 @@ class ImageUtils:
                     if image_array is None:
                         raise ValueError("이미지 디코딩 실패")
                     
-                    logger.debug(f"[{request_id}] 이미지 다운로드 및 디코딩 성공: {image_array.shape}")
+                    logger.debug(f"이미지 다운로드 및 디코딩 성공: {image_array.shape}")
                     return image_array
                     
         except ImportError:
-            logger.error(f"[{request_id}] aiohttp가 설치되지 않아 이미지 다운로드 불가")
+            logger.error(f"aiohttp가 설치되지 않아 이미지 다운로드 불가")
             return None
         except Exception as e:
-            logger.error(f"[{request_id}] URL에서 이미지 다운로드 실패: {e}", exc_info=True)
+            logger.error(f"URL에서 이미지 다운로드 실패: {e}", exc_info=True)
             return None
     
     async def save_image_to_file(self, image_array: np.ndarray, image_id: str) -> Tuple[bool, str]:
@@ -110,14 +110,13 @@ class ImageUtils:
             logger.error(error_msg, exc_info=True)
             return False, error_msg
     
-    async def save_result_to_json(self, image_id: str, file_path: str, request_id: str):
+    async def save_result_to_json(self, image_id: str, file_path: str):
         """
         결과를 JSON 파일에 저장
         
         Args:
             image_id: 이미지 ID
             file_path: 저장된 파일 경로
-            request_id: 요청 ID
         """
         try:
             # 기존 결과 로드
@@ -129,7 +128,6 @@ class ImageUtils:
             # 새 결과 추가
             new_result = {
                 "timestamp": datetime.now().isoformat(),
-                "request_id": request_id,
                 "image_id": image_id,
                 "file_path": file_path,
                 "status": "completed"
