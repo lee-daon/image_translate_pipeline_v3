@@ -6,6 +6,7 @@ import signal
 import time
 import asyncio
 import concurrent.futures
+import uuid
 from typing import List, Dict, Tuple, Any, Optional
 from functools import partial
 
@@ -139,7 +140,13 @@ class AsyncInpaintingWorker:
 
     async def process_task_from_redis(self, task_data: dict):
         """Redis에서 받은 작업을 처리하여 전체 파이프라인을 실행"""
+        # request_id가 없으면 새로 생성하여 task_data에 추가
         request_id = task_data.get("request_id")
+        if not request_id:
+            request_id = str(uuid.uuid4())
+            task_data["request_id"] = request_id
+            logger.info(f"Generated new request_id: {request_id} for image_id: {task_data.get('image_id')}")
+            
         image_id = task_data.get("image_id")
         try:
             image_url = task_data.get("image_url")

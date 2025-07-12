@@ -98,10 +98,16 @@ class RenderingProcessor:
             if original_image is None:
                 raise ValueError("Failed to get original image array")
             
+            if inpainted_image is None:
+                raise ValueError("Failed to get inpainted image array")
+            
+            if translate_data is None:
+                raise ValueError("Failed to get translate data")
+            
             # 1. 최종 출력 크기 결정
             original_h, original_w = original_image.shape[:2]
             if not is_long:
-                target_h, target_w = RESIZE_TARGET_SIZE, RESIZE_TARGET_SIZE
+                target_h, target_w = RESIZE_TARGET_SIZE
             else:
                 target_w = 864
                 target_h = int(original_h * (target_w / original_w)) if original_w > 0 else 0

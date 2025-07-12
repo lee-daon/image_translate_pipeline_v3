@@ -55,10 +55,8 @@ async def enqueue_error_result(request_id: str, image_id: str, error_message: st
     try:
         redis_client = get_redis_client()
         error_data = {
-            "request_id": request_id,
             "image_id": image_id,
-            "error_message": error_message,
-            "timestamp": time.time()
+            "error_message": error_message
         }
         error_json = json.dumps(error_data).encode('utf-8')
         await redis_client.rpush(ERROR_QUEUE, error_json)
@@ -74,10 +72,8 @@ async def enqueue_success_result(request_id: str, image_id: str, image_url: str,
     try:
         redis_client = get_redis_client()
         success_data = {
-            "request_id": request_id,
             "image_id": image_id,
-            "image_url": image_url,
-            "timestamp": time.time()
+            "image_url": image_url
         }
         success_json = json.dumps(success_data).encode('utf-8')
         await redis_client.rpush(queue_name, success_json)
