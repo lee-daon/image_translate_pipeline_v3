@@ -11,7 +11,8 @@ from PIL import Image, ImageDraw, ImageFont
 from core.config import (
     RESIZE_TARGET_SIZE,
     FONT_PATH,
-    JPEG_QUALITY2
+    JPEG_QUALITY2,
+    MASK_PADDING_PIXELS
 )
 from core.redis_client import get_redis_client, enqueue_error_result, enqueue_success_result
 from hosting.r2hosting import R2ImageHosting
@@ -78,6 +79,130 @@ class RenderingProcessor:
                 return None
         return self.font_cache[size]
 
+    def _get_clean_sampling_mask(self, current_box_np: np.ndarray, global_inpainted_mask: np.ndarray, height: int, width: int):
+        """
+        주어진 박스 주변의 '깨끗한' 샘플링 마스크와 인페인트 영역 마스크를 생성합니다.
+        
+        Args:
+            current_box_np: 현재 처리 중인 박스의 numpy 배열
+            global_inpainted_mask: 모든 인페인팅 영역을 포함하는 마스크
+            height: 이미지 높이
+            width: 이미지 너비
+            
+        Returns:
+            (np.ndarray, np.ndarray): (깨끗한 샘플링 마스크, 현재 박스의 인페인트 영역 마스크)
+        """
+        # 공통 설정
+        sampling_start_offset = MASK_PADDING_PIXELS + 4
+        sampling_ring_thickness = 25
+        
+        # 색상 보정 적용 영역은 MASK_PADDING_PIXELS + 1 만큼 확장
+        correction_area_padding = MASK_PADDING_PIXELS + 1
+        kernel_size_inpainted = (correction_area_padding * 2) + 1
+        
+        # 현재 박스 기준 마스크 생성
+        current_box_mask = np.zeros((height, width), dtype=np.uint8)
+        cv2.fillPoly(current_box_mask, [current_box_np], 255)
+        
+        # 현재 박스의 인페인팅 영역 (색상 보정 적용 대상)
+        inpainted_area_mask = cv2.dilate(current_box_mask, np.ones((kernel_size_inpainted, kernel_size_inpainted), np.uint8))
+        
+        # 잠재적 샘플링 링 계산
+        kernel_size_outer = ((sampling_start_offset + sampling_ring_thickness) * 2) + 1
+        outer_ring_mask = cv2.dilate(current_box_mask, np.ones((kernel_size_outer, kernel_size_outer), np.uint8))
+        kernel_size_inner = (sampling_start_offset * 2) + 1
+        inner_ring_mask = cv2.dilate(current_box_mask, np.ones((kernel_size_inner, kernel_size_inner), np.uint8))
+        potential_sampling_ring = cv2.bitwise_and(outer_ring_mask, cv2.bitwise_not(inner_ring_mask))
+        
+        # 다른 인페인팅 영역을 제외하여 '깨끗한' 샘플링 링만 남김
+        clean_sampling_mask = cv2.bitwise_and(potential_sampling_ring, cv2.bitwise_not(global_inpainted_mask))
+        
+        return clean_sampling_mask, inpainted_area_mask
+
+    def _correct_global_color(self, original_image: np.ndarray, inpainted_image: np.ndarray, translate_data: dict, request_id: str) -> np.ndarray:
+        """
+        각 텍스트 박스 주변의 '로컬' 색상을 사용하여 인페인팅된 영역의 색감을 보정합니다.
+        원본과 인페인팅된 이미지의 동일한 주변부 영역을 비교하여 색상 변형량을 계산하고, 이를 인페인트 영역에 역적용합니다.
+        """
+        try:
+            height, width = original_image.shape[:2]
+
+            # 1. LAB 색상 공간으로 변환
+            original_lab = cv2.cvtColor(original_image, cv2.COLOR_BGR2LAB)
+            inpainted_lab = cv2.cvtColor(inpainted_image, cv2.COLOR_BGR2LAB)
+            l_inpainted, a_inpainted, b_inpainted = cv2.split(inpainted_lab)
+
+            # 2. 모든 텍스트 박스를 포함하는 전체 인페인팅 영역 마스크 생성 (오염 지도)
+            all_boxes_base_mask = np.zeros((height, width), dtype=np.uint8)
+            if "translate_result" in translate_data:
+                for item in translate_data["translate_result"]:
+                    if item.get("box"):
+                        box = np.array(item["box"], dtype=np.int32)
+                        if cv2.contourArea(box) > 0:
+                            cv2.fillPoly(all_boxes_base_mask, [box], 255)
+            
+            # 오염 지도는 더 넓게 설정하여 안전 마진을 확보
+            global_mask_padding = MASK_PADDING_PIXELS + 3
+            kernel_size_global = (global_mask_padding * 2) + 1
+            global_inpainted_mask = cv2.dilate(all_boxes_base_mask, np.ones((kernel_size_global, kernel_size_global), np.uint8))
+
+            # 3. 각 박스를 순회하며 색상 보정 적용
+            for item in translate_data.get("translate_result", []):
+                if not item.get("box"):
+                    continue
+
+                box_np = np.array(item["box"], dtype=np.int32)
+                if cv2.contourArea(box_np) < 1:
+                    continue
+
+                # 3-1. '깨끗한' 샘플링 마스크와 현재 박스의 인페인트 마스크 가져오기
+                clean_sampling_mask, inpainted_area_mask = self._get_clean_sampling_mask(
+                    box_np, global_inpainted_mask, height, width
+                )
+
+                # 3-2. 픽셀 추출
+                source_pixels = original_lab[clean_sampling_mask > 0]
+                reference_pixels = inpainted_lab[clean_sampling_mask > 0]
+
+                if source_pixels.shape[0] < 50 or reference_pixels.shape[0] < 50:
+                    logger.warning(f"[{request_id}] Not enough clean pixels in sampling ring for local color correction. Skipping a box.")
+                    continue
+                
+                # 3-3. 색상 통계 계산
+                l_mean_src, a_mean_src, b_mean_src = np.mean(source_pixels, axis=0)
+                l_std_src, a_std_src, b_std_src = np.std(source_pixels, axis=0)
+
+                l_mean_ref, a_mean_ref, b_mean_ref = np.mean(reference_pixels, axis=0)
+                l_std_ref, a_std_ref, b_std_ref = np.std(reference_pixels, axis=0)
+
+                l_std_ref = max(l_std_ref, 1e-6)
+                a_std_ref = max(a_std_ref, 1e-6)
+                b_std_ref = max(b_std_ref, 1e-6)
+
+                # 3-4. 인페인트된 영역의 픽셀에 색상 변환 적용
+                l_patch = l_inpainted[inpainted_area_mask > 0]
+                a_patch = a_inpainted[inpainted_area_mask > 0]
+                b_patch = b_inpainted[inpainted_area_mask > 0]
+
+                l_new = (l_patch - l_mean_ref) * (l_std_src / l_std_ref) + l_mean_src
+                a_new = (a_patch - a_mean_ref) * (a_std_src / a_std_ref) + a_mean_src
+                b_new = (b_patch - b_mean_ref) * (b_std_src / b_std_ref) + b_mean_src
+
+                l_inpainted[inpainted_area_mask > 0] = np.clip(l_new, 0, 255)
+                a_inpainted[inpainted_area_mask > 0] = np.clip(a_new, 0, 255)
+                b_inpainted[inpainted_area_mask > 0] = np.clip(b_new, 0, 255)
+
+            # 4. 수정된 채널을 병합하고 BGR로 변환
+            corrected_lab = cv2.merge([l_inpainted, a_inpainted, b_inpainted])
+            corrected_bgr = cv2.cvtColor(corrected_lab, cv2.COLOR_LAB2BGR)
+            
+            logger.info(f"[{request_id}] Local color correction applied successfully to text boxes.")
+            return corrected_bgr
+
+        except Exception as e:
+            logger.error(f"[{request_id}] Local color correction failed: {e}. Returning original inpainted image.", exc_info=True)
+            return inpainted_image
+
     def process_rendering_sync(self, task_data: dict):
         """렌더링 처리 (순수 동기 함수 - ThreadPool에서 실행)"""
         request_id = task_data.get("request_id", "unknown")
@@ -120,10 +245,11 @@ class RenderingProcessor:
             width_scale = target_w / original_w if original_w > 0 else 0
             translate_data = self._scale_bounding_boxes(translate_data, width_scale, height_scale)
 
-            # 4. 고품질 배경 생성: 원본(선명)을 기반으로 인페인팅(깨끗)된 부분만 합성
-            rendered_image = resized_original.copy()
+            # 4. 전역 색상 보정: 인페인팅된 이미지 전체의 색감을 원본의 배경 톤에 맞춤
+            color_corrected_inpainted = self._correct_global_color(resized_original, resized_inpainted, translate_data, request_id)
             
-            # 번역 결과에 있는 모든 박스 영역을 인페인팅된 이미지로 교체
+            # 5. 고품질 배경 생성: 선명한 원본을 기반으로, 색상이 보정된 인페인팅 영역만 합성
+            rendered_image = resized_original.copy()
             if "translate_result" in translate_data:
                 for item in translate_data["translate_result"]:
                     if "box" in item and item["box"]:
@@ -136,18 +262,17 @@ class RenderingProcessor:
                         x_max, y_max = min(target_w, x_max), min(target_h, y_max)
 
                         if x_min < x_max and y_min < y_max:
-                            clean_patch = resized_inpainted[y_min:y_max, x_min:x_max]
-                            rendered_image[y_min:y_max, x_min:x_max] = clean_patch
+                            # 색상이 보정된 인페인팅 이미지에서 패치를 가져옴
+                            corrected_patch = color_corrected_inpainted[y_min:y_max, x_min:x_max]
+                            rendered_image[y_min:y_max, x_min:x_max] = corrected_patch
 
-            # 5. 렌더링할 텍스트가 있는지 확인
+            # 6. 렌더링할 텍스트가 있는지 확인
             texts_to_render = [
                 item for item in translate_data.get("translate_result", []) 
                 if item.get("translated_text", "").strip()
             ]
 
             if texts_to_render:
-                # 렌더링할 텍스트가 있을 때만 후속 처리 수행
-                image_for_text_color_selection = resized_original
 
                 # 폰트 크기 계산
                 if self.text_size_calculator:
@@ -162,8 +287,8 @@ class RenderingProcessor:
                     translate_data = self.text_color_selector.select_text_color(
                         request_id=request_id,
                         translate_data=translate_data,
-                        original_image=image_for_text_color_selection,
-                        inpainted_image=rendered_image
+                        original_image=resized_original,  # 원본 이미지를 전달하여 텍스트 색상 후보 추출
+                        inpainted_image=rendered_image    # 최종 배경을 전달하여 대비 계산
                     )
                     logger.debug(f"[{request_id}] Text colors selected")
                 except Exception as e:

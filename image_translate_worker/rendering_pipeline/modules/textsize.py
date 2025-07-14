@@ -92,7 +92,7 @@ class TextSizeCalculator:
                 angle += 180
 
             # 10도 미만은 0도로 처리하여 수평으로 교정
-            if abs(angle) < 10:
+            if abs(angle) < 5:
                 logger.debug(f"Angle {angle:.2f} is less than 10 degrees. Resetting to 0 for horizontal alignment.")
                 angle = 0
             # 45도를 초과하면 렌더링 안정성을 위해 0도로 처리하고, 축 정렬된 박스 사용
