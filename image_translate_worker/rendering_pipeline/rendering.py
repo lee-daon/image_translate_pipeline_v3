@@ -122,6 +122,8 @@ class RenderingProcessor:
 
             # 4. 고품질 배경 생성: 원본(선명)을 기반으로 인페인팅(깨끗)된 부분만 합성
             rendered_image = resized_original.copy()
+            
+            # 번역 결과에 있는 모든 박스 영역을 인페인팅된 이미지로 교체
             if "translate_result" in translate_data:
                 for item in translate_data["translate_result"]:
                     if "box" in item and item["box"]:
@@ -136,32 +138,39 @@ class RenderingProcessor:
                         if x_min < x_max and y_min < y_max:
                             clean_patch = resized_inpainted[y_min:y_max, x_min:x_max]
                             rendered_image[y_min:y_max, x_min:x_max] = clean_patch
-            
-            # 5. 색상 선택 및 렌더링을 위한 이미지 설정
-            image_for_text_color_selection = resized_original
 
-            # 폰트 크기 계산
-            if self.text_size_calculator:
+            # 5. 렌더링할 텍스트가 있는지 확인
+            texts_to_render = [
+                item for item in translate_data.get("translate_result", []) 
+                if item.get("translated_text", "").strip()
+            ]
+
+            if texts_to_render:
+                # 렌더링할 텍스트가 있을 때만 후속 처리 수행
+                image_for_text_color_selection = resized_original
+
+                # 폰트 크기 계산
+                if self.text_size_calculator:
+                    try:
+                        translate_data = self.text_size_calculator.calculate_font_sizes(translate_data)
+                        logger.debug(f"[{request_id}] Font sizes calculated")
+                    except Exception as e:
+                        logger.error(f"[{request_id}] Font size calculation failed: {e}")
+                
+                # 텍스트 색상 선택
                 try:
-                    translate_data = self.text_size_calculator.calculate_font_sizes(translate_data)
-                    logger.debug(f"[{request_id}] Font sizes calculated")
+                    translate_data = self.text_color_selector.select_text_color(
+                        request_id=request_id,
+                        translate_data=translate_data,
+                        original_image=image_for_text_color_selection,
+                        inpainted_image=rendered_image
+                    )
+                    logger.debug(f"[{request_id}] Text colors selected")
                 except Exception as e:
-                    logger.error(f"[{request_id}] Font size calculation failed: {e}")
-            
-            # 텍스트 색상 선택
-            try:
-                translate_data = self.text_color_selector.select_text_color(
-                    request_id=request_id,
-                    translate_data=translate_data,
-                    original_image=image_for_text_color_selection,
-                    inpainted_image=rendered_image
-                )
-                logger.debug(f"[{request_id}] Text colors selected")
-            except Exception as e:
-                logger.error(f"[{request_id}] Text color selection failed: {e}")
-            
-            # 텍스트 렌더링
-            rendered_image = self._draw_texts_on_image(rendered_image, translate_data)
+                    logger.error(f"[{request_id}] Text color selection failed: {e}")
+                
+                # 텍스트 렌더링
+                rendered_image = self._draw_texts_on_image(rendered_image, translate_data)
             
             # 최종 결과를 R2에 업로드
             current_date = datetime.now().strftime('%Y-%m-%d')

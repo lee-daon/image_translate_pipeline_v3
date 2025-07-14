@@ -4,6 +4,7 @@ import json
 import logging
 import asyncio
 import time
+import re
 from typing import List
 
 import aiohttp
@@ -47,6 +48,13 @@ TRANSLATION_LIST_SCHEMA = {
 
 # R2 호스팅 인스턴스 생성
 r2_hosting = R2ImageHosting()
+
+def contains_chinese(text: str) -> bool:
+    """주어진 텍스트에 중국어 문자가 포함되어 있는지 확인합니다."""
+    if not text:
+        return False
+    # CJK 통합 한자 범위 (가장 일반적인 경우)
+    return bool(re.search(r'[\u4e00-\u9fff]', text))
 
 async def wait_for_rate_limit(request_id: str = "N/A"):
     """
@@ -157,8 +165,7 @@ async def call_gemini_translate_list(texts_to_translate: List[str], request_id: 
 
                     # 입력과 출력 리스트 길이 비교
                     if len(translated_list) != len(texts_to_translate):
-                         logger.error(f"[{request_id}] Gemini API 번역 결과 길이 불일치 (List). 입력: {len(texts_to_translate)}, 출력: {len(translated_list)}")
-                         raise ValueError(f"Length mismatch between input ({len(texts_to_translate)}) and translated output ({len(translated_list)}) (List)")
+                         return []
 
                     logger.debug(f"[{request_id}] Gemini API 응답 수신 (List). 번역된 항목 수: {len(translated_list)}")
                     return translated_list
@@ -285,33 +292,36 @@ async def process_and_save_translation(task_data: dict, image_url: str, result_c
                 # 번역 결과 처리
                 translate_result_for_rendering = []
                 
-                if texts_to_translate and not translated_texts:
-                    logger.error(f"[{request_id}] Translation API call failed or returned empty list.")
-                    # API 호출이 실패했으므로 에러 큐에 넣고 이 작업은 중단
-                    await enqueue_error_result(request_id, image_id, "Translation API call failed")
-                    return
-
-                if len(translated_texts) != len(original_items_for_rendering):
-                    logger.error(f"[{request_id}] Translation length mismatch")
-                    translate_result_for_rendering = None
-                else:
-                    for original_info, translated_text in zip(original_items_for_rendering, translated_texts):
+                if not translated_texts or len(translated_texts) != len(original_items_for_rendering):
+                    logger.debug(f"[{request_id}] 번역 실패 또는 길이 불일치. 인페인팅만 진행합니다. Original: {len(original_items_for_rendering)}, Translated: {len(translated_texts) if translated_texts else 0}")
+                    # 번역 텍스트를 비워 인페인팅만 되도록 유도
+                    for original_info in original_items_for_rendering:
                         translate_result_for_rendering.append({
                             "box": original_info["box"],
-                            "translated_text": translated_text,
+                            "translated_text": "", # 빈 텍스트
+                            "original_char_count": len(original_info["original_text"])
+                        })
+                else:
+                    for original_info, translated_text in zip(original_items_for_rendering, translated_texts):
+                        final_text = translated_text
+                        if contains_chinese(translated_text):
+                            logger.debug(f'[{request_id}] 번역 결과에 중국어가 포함되어 제외합니다: "{translated_text}"')
+                            final_text = ""
+                        
+                        translate_result_for_rendering.append({
+                            "box": original_info["box"],
+                            "translated_text": final_text,
                             "original_char_count": len(original_info["original_text"])
                         })
 
-                # 결과 저장 (메인 루프에서 async Redis 호출)
-                if translate_result_for_rendering is not None:
-                    rendering_data = {
-                        "image_id": image_id,
-                        "image_url": image_url,  # 원본 URL 그대로 사용
-                        "translate_result": translate_result_for_rendering
-                    }
-                    await save_result_to_internal_storage(result_checker, request_id, rendering_data)
-                    logger.debug(f"[{request_id}] Translation saved to internal storage")
-                    # 내부 저장소의 save_translation_result가 자동으로 렌더링 확인 및 트리거
+                # 결과를 항상 저장하여 인페인팅/렌더링 파이프라인으로 전달
+                rendering_data = {
+                    "image_id": image_id,
+                    "image_url": image_url,
+                    "translate_result": translate_result_for_rendering
+                }
+                await save_result_to_internal_storage(result_checker, request_id, rendering_data)
+                logger.debug(f"[{request_id}] Translation result saved to internal storage for inpainting/rendering")
             else:
                 # 번역할 텍스트가 없는 경우 - 성공 큐로 바로 전송
                 await enqueue_success_result(request_id, image_id, image_url)

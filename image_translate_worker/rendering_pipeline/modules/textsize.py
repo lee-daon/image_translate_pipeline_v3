@@ -91,9 +91,13 @@ class TextSizeCalculator:
             elif angle < -90:
                 angle += 180
 
-            # 사용자의 요청: 정규화된 각도를 ±30도로 제한하여 안정성 확보
-            if abs(angle) > 30:
-                logger.warning(f"Normalized angle {angle:.2f} is outside the allowed range [-30, 30]. "
+            # 10도 미만은 0도로 처리하여 수평으로 교정
+            if abs(angle) < 10:
+                logger.debug(f"Angle {angle:.2f} is less than 10 degrees. Resetting to 0 for horizontal alignment.")
+                angle = 0
+            # 45도를 초과하면 렌더링 안정성을 위해 0도로 처리하고, 축 정렬된 박스 사용
+            elif abs(angle) > 45:
+                logger.debug(f"Normalized angle {angle:.2f} is outside the allowed range [-45, 45]. "
                                f"Resetting angle to 0 and using axis-aligned box for font size.")
                 angle = 0
                 # 각도를 0으로 리셋하는 경우, 폰트 크기 계산을 위해 축 정렬된 박스 크기를 사용
