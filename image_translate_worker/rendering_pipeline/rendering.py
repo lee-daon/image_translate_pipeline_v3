@@ -230,7 +230,7 @@ class RenderingProcessor:
             if not is_long:
                 target_h, target_w = RESIZE_TARGET_SIZE
             else:
-                target_w = 864
+                target_w = 860
                 target_h = int(original_h * (target_w / original_w)) if original_w > 0 else 0
 
             if target_h <= 0 or target_w <= 0:
