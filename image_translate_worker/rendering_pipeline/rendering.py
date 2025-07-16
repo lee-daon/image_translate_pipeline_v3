@@ -250,21 +250,23 @@ class RenderingProcessor:
             
             # 5. 고품질 배경 생성: 선명한 원본을 기반으로, 색상이 보정된 인페인팅 영역만 합성
             rendered_image = resized_original.copy()
+
+            # 붙여넣을 전체 영역을 마스크로 계산
+            paste_mask = np.zeros((target_h, target_w), dtype=np.uint8)
             if "translate_result" in translate_data:
                 for item in translate_data["translate_result"]:
                     if "box" in item and item["box"]:
                         box = np.array(item["box"], dtype=np.int32)
-                        x_min, y_min = np.min(box, axis=0)
-                        x_max, y_max = np.max(box, axis=0)
+                        if cv2.contourArea(box) > 0:
+                            cv2.fillPoly(paste_mask, [box], 255)
+            
+            # 마스크 확장: 텍스트 박스 + MASK_PADDING_PIXELS + 1
+            paste_padding = MASK_PADDING_PIXELS + 1
+            kernel = np.ones((paste_padding * 2 + 1, paste_padding * 2 + 1), np.uint8)
+            dilated_paste_mask = cv2.dilate(paste_mask, kernel)
 
-                        # 좌표가 이미지 경계 내에 있도록 보정
-                        x_min, y_min = max(0, x_min), max(0, y_min)
-                        x_max, y_max = min(target_w, x_max), min(target_h, y_max)
-
-                        if x_min < x_max and y_min < y_max:
-                            # 색상이 보정된 인페인팅 이미지에서 패치를 가져옴
-                            corrected_patch = color_corrected_inpainted[y_min:y_max, x_min:x_max]
-                            rendered_image[y_min:y_max, x_min:x_max] = corrected_patch
+            # 확장된 마스크를 사용해 색상 보정된 영역을 한 번에 합성
+            rendered_image[dilated_paste_mask > 0] = color_corrected_inpainted[dilated_paste_mask > 0]
 
             # 6. 렌더링할 텍스트가 있는지 확인
             texts_to_render = [
