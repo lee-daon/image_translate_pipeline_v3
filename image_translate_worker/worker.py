@@ -222,24 +222,32 @@ class AsyncInpaintingWorker:
                         return
 
                 await self.concurrent_task_semaphore.acquire()
-                task_tuple = await get_redis_client().blpop([PROCESSOR_TASK_QUEUE], timeout=1)
-                
-                if task_tuple:
-                    # 작업 카운터 증가
+                try:
+                    # timeout=0으로 설정하여 작업이 올 때까지 무한정 대기 (가장 효율적)
+                    task_tuple = await get_redis_client().blpop([PROCESSOR_TASK_QUEUE], timeout=0)
+
+                    # blpop(timeout=0)은 항상 값을 반환하므로 task_tuple은 None이 될 수 없음
                     async with tasks_count_lock_8473:
                         pending_tasks_count_8473 += 1
                     logger.debug(f"Task received, pending count: {pending_tasks_count_8473}")
-                    
+
                     task_data = json.loads(task_tuple[1].decode('utf-8'))
                     asyncio.create_task(self.process_task_from_redis(task_data))
-                else:
+
+                except (redis.exceptions.RedisError, json.JSONDecodeError) as e:
+                    logger.error(f"Error in '{name}': {e}", exc_info=True)
                     self.concurrent_task_semaphore.release()
-            except (redis.exceptions.RedisError, json.JSONDecodeError) as e:
-                logger.error(f"Error in '{name}': {e}", exc_info=True)
-                self.concurrent_task_semaphore.release()
+                    await asyncio.sleep(5)
+                except asyncio.CancelledError:
+                    # 작업자 종료 시 대기 중이던 semaphore를 해제
+                    self.concurrent_task_semaphore.release()
+                    break
+            except Exception as e:
+                # 예상치 못한 에러 발생 시 semaphore 누수 방지
+                if self.concurrent_task_semaphore.locked():
+                    self.concurrent_task_semaphore.release()
+                logger.critical(f"Unexpected error in '{name}': {e}", exc_info=True)
                 await asyncio.sleep(5)
-            except asyncio.CancelledError:
-                break
 
     async def _inpainting_batch_processor(self, name: str):
         """주기적으로 또는 트리거에 의해 깨어나 배치 처리"""

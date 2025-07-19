@@ -89,12 +89,9 @@ class ImageResultWorker:
         except Exception as e:
             logger.error(f"파일 저장 작업 처리 중 오류: {str(e)}", exc_info=True)
             
-    async def start_worker(self, poll_interval: float = 1.0):
+    async def start_worker(self):
         """
         파일 저장 워커 시작
-        
-        Args:
-            poll_interval: 큐 폴링 간격 (초)
         """
         logger.info(f"이미지 파일 저장 워커 시작 - 큐: {HOSTING_TASKS_QUEUE}")
         
@@ -107,31 +104,30 @@ class ImageResultWorker:
         
         while True:
             try:
-                # 큐에서 작업 가져오기
-                task = await self.redis.blpop(HOSTING_TASKS_QUEUE, timeout=int(poll_interval))
+                # 큐에서 작업 가져오기 (timeout=0, 무한 대기)
+                task = await self.redis.blpop(HOSTING_TASKS_QUEUE, timeout=0)
                 
-                if task:
-                    queue_name_bytes, task_data_bytes = task
-                    logger.info(f"새 작업 수신 - 데이터 크기: {len(task_data_bytes)} bytes")
+                queue_name_bytes, task_data_bytes = task
+                logger.info(f"새 작업 수신 - 데이터 크기: {len(task_data_bytes)} bytes")
+                
+                try:
+                    task_data = json.loads(task_data_bytes.decode('utf-8'))
                     
-                    try:
-                        task_data = json.loads(task_data_bytes.decode('utf-8'))
-                        
-                        # 작업 처리 (작업마다 새 태스크 생성)
-                        asyncio.create_task(self.process_hosting_task(task_data))
-                        
-                    except json.JSONDecodeError as e:
-                        logger.error(f"작업 데이터 디코딩 오류: {task_data_bytes}. 오류: {e}")
-                    except Exception as proc_e:
-                        logger.error(f"작업 처리 중 오류: {proc_e}", exc_info=True)
+                    # 작업 처리 (작업마다 새 태스크 생성)
+                    asyncio.create_task(self.process_hosting_task(task_data))
+                    
+                except json.JSONDecodeError as e:
+                    logger.error(f"작업 데이터 디코딩 오류: {task_data_bytes}. 오류: {e}")
+                except Exception as proc_e:
+                    logger.error(f"작업 처리 중 오류: {proc_e}", exc_info=True)
                 
             except asyncio.CancelledError:
                 logger.info("워커 태스크 취소됨")
                 break
             except Exception as e:
                 logger.error(f"작업 처리 루프 중 오류: {str(e)}", exc_info=True)
-                logger.info(f"{poll_interval}초 후 재시도...")
-                await asyncio.sleep(poll_interval)
+                logger.info(f"5초 후 재시도...")
+                await asyncio.sleep(5)
         
         logger.info("이미지 파일 저장 워커 종료")
 

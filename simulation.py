@@ -5,7 +5,7 @@ import uuid
 import argparse
 
 # 기본 설정값
-DEFAULT_REDIS_URL = "redis://localhost:6380"  # Docker Redis 포트 변경
+DEFAULT_REDIS_URL = REDIS_URL="rediss://default:AegeAAIjcDEyNDM5NWI2NjUwOGI0ODBlOGY3MTg2ZTUxZTgzMzJhM3AxMA@factual-starling-59422.upstash.io:6379"
 OCR_TASK_QUEUE = "img:translate:tasks"
 
 # 이미지 URL 목록 (is_long=false)
