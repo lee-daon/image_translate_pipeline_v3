@@ -45,7 +45,7 @@ aiohttp>=3.8.0
 - `REDIS_URL`: Redis 서버 URL (기본값: redis://localhost:6379)
 - `HOSTING_TASKS_QUEUE`: 호스팅 작업 큐 이름 (기본값: hosting_tasks)
 - `OUTPUT_DIR`: 출력 디렉토리 경로 (기본값: ./output/translated)
-- `JPEG_QUALITY`: 이미지 품질 1-100 (기본값: 80)
+
 - `LOG_LEVEL`: 로그 레벨 (기본값: INFO)
 
 ## 사용 방법

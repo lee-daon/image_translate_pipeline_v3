@@ -5,7 +5,7 @@ from typing import Dict, Any
 from dotenv import load_dotenv
 
 # 코어 모듈 임포트 (로컬 core 폴더에서)
-from core.config import HOSTING_TASKS_QUEUE, OUTPUT_DIR, JPEG_QUALITY
+from core.config import HOSTING_TASKS_QUEUE, OUTPUT_DIR
 from core.redis_client import get_redis_client, initialize_redis, close_redis
 from core.image_utils import ImageUtils
 
@@ -25,7 +25,7 @@ class ImageResultWorker:
     def __init__(self):
         """초기화"""
         self.redis = get_redis_client()
-        self.image_utils = ImageUtils(OUTPUT_DIR, JPEG_QUALITY)
+        self.image_utils = ImageUtils(OUTPUT_DIR)
         
         # 공유 메모리 객체 추적 (정리용)
         self.active_shm_objects = []

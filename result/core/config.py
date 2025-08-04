@@ -15,4 +15,4 @@ LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
 
 # 이미지 출력 설정
 OUTPUT_DIR = os.environ.get("OUTPUT_DIR", "./output/translated")
-JPEG_QUALITY = int(os.environ.get("JPEG_QUALITY", "80"))
+

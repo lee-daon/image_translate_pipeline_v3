@@ -31,7 +31,6 @@ from core.config import (
     WORKER_BATCH_MAX_WAIT_TIME_SECONDS,
     PROCESSOR_TASK_QUEUE,
     CPU_WORKER_COUNT,
-    JPEG_QUALITY,
     MAX_CONCURRENT_TASKS,
     MAX_PENDING_TASKS,
     SHUTDOWN_MAX_WAIT_SECONDS
@@ -95,8 +94,7 @@ class AsyncInpaintingWorker:
         self.ocr_processor = OcrProcessor(
             loop=main_loop, 
             cpu_executor=self.cpu_executor,
-            gpu_executor=self.gpu_executor,
-            jpeg_quality=JPEG_QUALITY
+            gpu_executor=self.gpu_executor
         )
         await self.ocr_processor.initialize_model()
         logger.info("✅ OCR Processor initialized.")

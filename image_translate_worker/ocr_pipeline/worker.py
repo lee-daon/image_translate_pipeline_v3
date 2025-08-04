@@ -23,19 +23,17 @@ class OcrProcessor:
     PaddleOCR 모델을 사용하여 이미지에서 텍스트를 추출하는 캡슐화된 클래스.
     CPU 작업과 GPU 작업을 별도의 Executor에서 처리하여 최적화합니다.
     """
-    def __init__(self, loop, cpu_executor, gpu_executor, jpeg_quality: int = 95):
+    def __init__(self, loop, cpu_executor, gpu_executor):
         """
         OcrProcessor를 초기화합니다.
         Args:
             loop: 비동기 이벤트 루프.
             cpu_executor: 이미지 전처리 등 CPU 바운드 작업을 위한 실행자.
             gpu_executor: OCR 모델 로딩 및 추론 등 GPU 바운드 작업을 위한 실행자.
-            jpeg_quality: JPG 변환 시 사용할 품질.
         """
         self.loop = loop
         self.cpu_executor = cpu_executor
         self.gpu_executor = gpu_executor
-        self.jpeg_quality = jpeg_quality
         self.ocr_model = None
         self.temp_dir = tempfile.mkdtemp(prefix="ocr_processor_")
         logger.info(f"OCR Processor's temp directory created: {self.temp_dir}")
@@ -97,7 +95,7 @@ class OcrProcessor:
                 if image.mode != 'RGB':
                     image = image.convert('RGB')
                 output_buffer = io.BytesIO()
-                image.save(output_buffer, format="JPEG", quality=self.jpeg_quality)
+                image.save(output_buffer, format="JPEG", quality=100)
                 image = Image.open(output_buffer)
                 image.load()
 

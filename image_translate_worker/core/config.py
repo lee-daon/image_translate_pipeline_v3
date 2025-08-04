@@ -36,10 +36,6 @@ INPAINTER_GPU_BATCH_SIZE = int(os.environ.get("INPAINTER_GPU_BATCH_SIZE", "4"))
 WORKER_BATCH_MAX_WAIT_TIME_SECONDS = float(os.environ.get("WORKER_BATCH_MAX_WAIT_TIME_SECONDS", "5.0"))
 
 # webp->jpeg 변환 품질
-JPEG_QUALITY = int(os.environ.get("JPEG_QUALITY", "95"))  # JPEG 변환 품질
-
-# 이미지 호스팅 품질
-JPEG_QUALITY2 = int(os.environ.get("JPEG_QUALITY2", "95"))
 
 # === OCR 모델 설정 ===
 OCR_MODELS_DIR = "/app/models"

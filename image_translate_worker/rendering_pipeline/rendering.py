@@ -11,10 +11,9 @@ from PIL import Image, ImageDraw, ImageFont
 from core.config import (
     RESIZE_TARGET_SIZE,
     FONT_PATH,
-    JPEG_QUALITY2,
     MASK_PADDING_PIXELS
 )
-from core.redis_client import get_redis_client, enqueue_error_result, enqueue_success_result
+from core.redis_client import enqueue_error_result, enqueue_success_result
 from hosting.r2hosting import R2ImageHosting
 
 # 렌더링 관련 모듈 임포트
@@ -225,20 +224,20 @@ class RenderingProcessor:
             if translate_data is None:
                 raise ValueError("Failed to get translate data")
             
+            if inpainted_image.shape != original_image.shape:
+                original_h, original_w = original_image.shape[:2]
+                inpainted_image = cv2.resize(inpainted_image, (original_w, original_h), interpolation=cv2.INTER_AREA)
+
             # 1. 최종 출력 크기 결정
             original_h, original_w = original_image.shape[:2]
             if not is_long:
                 target_h, target_w = RESIZE_TARGET_SIZE
+                resized_original = cv2.resize(original_image, (target_w, target_h), interpolation=cv2.INTER_AREA)
+                resized_inpainted = cv2.resize(inpainted_image, (target_w, target_h), interpolation=cv2.INTER_AREA)
             else:
-                target_w = 860
-                target_h = int(original_h * (target_w / original_w)) if original_w > 0 else 0
-
-            if target_h <= 0 or target_w <= 0:
-                raise ValueError(f"Invalid target size: ({target_w}, {target_h}) for original size ({original_w}, {original_h})")
-
-            # 2. 이미지 리사이즈
-            resized_original = cv2.resize(original_image, (target_w, target_h), interpolation=cv2.INTER_AREA)
-            resized_inpainted = cv2.resize(inpainted_image, (target_w, target_h), interpolation=cv2.INTER_AREA)
+                target_h, target_w = original_h, original_w
+                resized_original = original_image
+                resized_inpainted = inpainted_image
             
             # 3. 좌표 스케일링
             height_scale = target_h / original_h if original_h > 0 else 0
@@ -318,7 +317,6 @@ class RenderingProcessor:
                 image_id=final_image_id,
                 sub_path=f'translated_image/{current_date}/{product_id}',
                 file_ext='.jpg',
-                quality=JPEG_QUALITY2,
                 metadata={
                     "request_id": request_id,
                     "image_id": image_id

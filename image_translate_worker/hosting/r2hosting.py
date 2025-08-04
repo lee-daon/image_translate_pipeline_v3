@@ -60,7 +60,6 @@ class R2ImageHosting:
                                image_id: str, 
                                sub_path: str = 'translated',
                                file_ext: str = '.jpg',
-                               quality: int = 90,
                                metadata: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
         """
         NumPy 배열을 이미지로 변환하여 R2에 업로드
@@ -70,7 +69,6 @@ class R2ImageHosting:
             image_id: 이미지 ID (파일명으로 사용)
             sub_path: 버킷 내 하위 경로
             file_ext: 파일 확장자 (.jpg, .png 등)
-            quality: JPEG 품질 (1-100)
             metadata: 추가 메타데이터
             
         Returns:
@@ -80,7 +78,7 @@ class R2ImageHosting:
             # 이미지 인코딩
             ext = file_ext.lower()
             if ext in ['.jpg', '.jpeg']:
-                encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), quality]
+                encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 100]
                 success, encoded_img = cv2.imencode('.jpg', image_array, encode_param)
                 content_type = 'image/jpeg'
             elif ext == '.png':

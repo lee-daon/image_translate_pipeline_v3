@@ -13,17 +13,15 @@ logger = logging.getLogger(__name__)
 class ImageUtils:
     """이미지 처리 관련 유틸리티 클래스"""
     
-    def __init__(self, output_dir: str = './output/translated', jpeg_quality: int = 80):
+    def __init__(self, output_dir: str = './output/translated'):
         """
         초기화
         
         Args:
             output_dir: 출력 디렉토리 경로
-            jpeg_quality: JPEG 품질 (1-100)
         """
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
-        self.jpeg_quality = jpeg_quality
         
         # 결과 저장을 위한 JSON 파일 경로
         self.results_file = self.output_dir / 'results.json'
@@ -94,7 +92,7 @@ class ImageUtils:
             success = cv2.imwrite(
                 str(file_path),
                 image_array,
-                [cv2.IMWRITE_JPEG_QUALITY, self.jpeg_quality]
+                [cv2.IMWRITE_JPEG_QUALITY, 100]
             )
             
             if success:

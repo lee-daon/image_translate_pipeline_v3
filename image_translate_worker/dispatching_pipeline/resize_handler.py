@@ -36,17 +36,21 @@ def handle_no_chinese_text_sync(
             logger.warning(f"[{request_id}] Failed to decode image for resizing.")
             return original_url
         
-        h, w = img.shape[:2]
-        target_h, target_w = (int(h * (864 / w)), 864) if is_long else RESIZE_TARGET_SIZE
-        resized = cv2.resize(img, (target_w, target_h))
+        if is_long:
+            # is_long이 true이면 리사이즈를 건너뛰고 원본 이미지를 그대로 사용
+            resized = img
+        else:
+            target_h, target_w = RESIZE_TARGET_SIZE
+            resized = cv2.resize(img, (target_w, target_h))
 
         date_str = datetime.now().strftime('%Y-%m-%d')
         product_id, rem = (image_id.split('-', 1) + [""])[:2]
         final_id = f"{rem}-{request_id[:5]}" if rem else f"{image_id}-{request_id[:5]}"
         
         res = r2_hosting_instance.upload_image_from_array(
-            resized, final_id, f'translated_image/{date_str}/{product_id}', '.jpg', 90,
-            {"request_id": request_id, "image_id": image_id, "type": "resized_no_text"}
+            resized, final_id, f'translated_image/{date_str}/{product_id}', 
+            file_ext='.jpg',
+            metadata={"request_id": request_id, "image_id": image_id, "type": "resized_no_text"}
         )
         return res["url"] if res.get("success") else original_url
     except Exception as e:
