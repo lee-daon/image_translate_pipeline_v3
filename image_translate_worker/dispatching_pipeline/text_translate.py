@@ -304,7 +304,16 @@ async def process_and_save_translation(task_data: dict, image_url: str, result_c
                 else:
                     for original_info, translated_text in zip(original_items_for_rendering, translated_texts):
                         final_text = translated_text
-                        if contains_chinese(translated_text):
+                        
+                        # 특정 단어가 포함된 경우 공백으로 전환
+                        filtered_words = ["품질보장", "무료반품", "a/s보장", "a/s","A/S","A/S보장"]
+                        for word in filtered_words:
+                            if word in translated_text:
+                                logger.debug(f'[{request_id}] 번역 결과에 필터링 대상 단어 "{word}"가 포함되어 제외합니다: "{translated_text}"')
+                                final_text = ""
+                                break
+                        
+                        if final_text and contains_chinese(translated_text):
                             logger.debug(f'[{request_id}] 번역 결과에 중국어가 포함되어 제외합니다: "{translated_text}"')
                             final_text = ""
                         
