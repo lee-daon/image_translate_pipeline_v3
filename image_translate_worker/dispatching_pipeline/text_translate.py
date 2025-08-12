@@ -76,6 +76,76 @@ async def wait_for_rate_limit(request_id: str = "N/A"):
         _last_request_time = time.time()
         logger.debug(f"[{request_id}] Rate limit check passed (RPS: {TRANSLATION_RPS})")
 
+async def _fallback_translate_in_groups(
+    session: aiohttp.ClientSession,
+    texts_to_translate: List[str],
+    system_instruction: str,
+    request_id: str,
+) -> List[str]:
+    """
+    배치 번역이 실패했을 때 고정 크기 그룹(기본 3개)으로 Gemini를 호출하는 폴백 루틴.
+
+    동작 원칙:
+    - 텍스트를 최대 3개 단위로 묶어 동일 JSON 배열 스키마로 요청/응답.
+    - 각 그룹마다 `wait_for_rate_limit` 적용(RPS 준수).
+    - 그룹 응답 파싱 실패/불일치 시 해당 그룹 범위를 빈 문자열로 채움.
+
+    Args:
+        session: 재사용할 aiohttp 세션
+        texts_to_translate: 번역 대상 문자열 리스트
+        system_instruction: 시스템 지침 프롬프트
+        request_id: 로깅용 요청 ID
+
+    Returns:
+        입력 리스트와 동일 길이의 번역 문자열 리스트. 실패 항목은 빈 문자열.
+    """
+    results: List[str] = []
+    total = len(texts_to_translate)
+    group_index = 0
+    for start in range(0, total, 3):
+        end = min(start + 3, total)
+        chunk = texts_to_translate[start:end]
+        try:
+            await wait_for_rate_limit(f"{request_id}:g{group_index}")
+            chunk_prompt = json.dumps(chunk, ensure_ascii=False)
+            chunk_request = {
+                "system_instruction": {"parts": [{"text": system_instruction}]},
+                "contents": [{"role": "user", "parts": [{"text": chunk_prompt}]}],
+                "generationConfig": {
+                    "responseMimeType": "application/json",
+                    "responseSchema": TRANSLATION_LIST_SCHEMA,
+                },
+            }
+            async with session.post(API_URL, json=chunk_request) as chunk_resp:
+                chunk_text = await chunk_resp.text()
+                chunk_resp.raise_for_status()
+                data = json.loads(chunk_text)
+                if data.get("candidates") and \
+                   len(data["candidates"]) > 0 and \
+                   data["candidates"][0].get("content") and \
+                   data["candidates"][0]["content"].get("parts") and \
+                   len(data["candidates"][0]["content"]["parts"]) > 0 and \
+                   isinstance(data["candidates"][0]["content"]["parts"][0].get("text"), str):
+                    inner_json = data["candidates"][0]["content"]["parts"][0]["text"]
+                    try:
+                        chunk_list = json.loads(inner_json)
+                        if isinstance(chunk_list, list) and len(chunk_list) == len(chunk):
+                            results.extend(chunk_list)
+                        else:
+                            logger.warning(f"[{request_id}] 그룹 번역 길이 불일치 gidx={group_index} input={len(chunk)} output={len(chunk_list) if isinstance(chunk_list, list) else 'N/A'}")
+                            results.extend([""] * len(chunk))
+                    except json.JSONDecodeError:
+                        logger.warning(f"[{request_id}] 그룹 응답 내부 JSON 파싱 실패 gidx={group_index}. 응답: {inner_json}")
+                        results.extend([""] * len(chunk))
+                else:
+                    logger.warning(f"[{request_id}] 그룹 응답 구조 불일치 gidx={group_index}. 응답: {data}")
+                    results.extend([""] * len(chunk))
+        except Exception as group_e:
+            logger.warning(f"[{request_id}] 그룹 번역 실패 gidx={group_index}: {group_e}")
+            results.extend([""] * len(chunk))
+        group_index += 1
+    return results
+
 async def call_gemini_translate_list(texts_to_translate: List[str], request_id: str = "N/A") -> List[str]:
     """
     Gemini API를 JSON 모드로 호출하여 텍스트 리스트 전체를 번역합니다.
@@ -110,9 +180,6 @@ async def call_gemini_translate_list(texts_to_translate: List[str], request_id: 
         logger.error(f"[{request_id}] 입력 텍스트 리스트를 JSON으로 변환 실패: {e}")
         raise e
 
-    headers = {
-        'Content-Type': 'application/json'
-    }
     request_data = {
         "system_instruction": {
             "parts": [{"text": system_instruction}]
@@ -132,8 +199,9 @@ async def call_gemini_translate_list(texts_to_translate: List[str], request_id: 
     logger.debug(f"[{request_id}] Calling Gemini API (JSON List). URL: {API_URL.split('?')[0]}, Num Texts: {len(texts_to_translate)}, Prompt (partial): {prompt_content[:100]}...")
 
     async with aiohttp.ClientSession() as session:
+        response_text = None
         try:
-            async with session.post(API_URL, headers=headers, json=request_data) as response:
+            async with session.post(API_URL, json=request_data) as response:
                 response_text = await response.text()
                 response.raise_for_status()
 
@@ -141,7 +209,8 @@ async def call_gemini_translate_list(texts_to_translate: List[str], request_id: 
                     response_data = json.loads(response_text)
                 except json.JSONDecodeError:
                     logger.error(f"[{request_id}] Gemini API JSON 응답 파싱 실패 (List). 응답: {response_text}")
-                    raise ValueError("Failed to parse Gemini API JSON response (List)")
+                    # 배치 파싱 실패 → 그룹(3개) 폴백
+                    return await _fallback_translate_in_groups(session, texts_to_translate, system_instruction, request_id)
 
                 # JSON 모드 응답 구조 파싱
                 if response_data.get("candidates") and \
@@ -156,44 +225,41 @@ async def call_gemini_translate_list(texts_to_translate: List[str], request_id: 
                         translated_list = json.loads(translated_list_json)
                     except json.JSONDecodeError:
                         logger.error(f"[{request_id}] Gemini API 반환 JSON 내부 파싱 실패 (List). 내부 JSON: {translated_list_json}")
-                        raise ValueError("Failed to parse inner JSON from Gemini API response (List)")
+                        # 내부 JSON 파싱 실패 → 그룹(3개) 폴백
+                        return await _fallback_translate_in_groups(session, texts_to_translate, system_instruction, request_id)
 
                     # 반환된 것이 리스트인지 확인
                     if not isinstance(translated_list, list):
                         logger.error(f"[{request_id}] Gemini API가 JSON 배열을 반환하지 않음 (List). 반환값 타입: {type(translated_list)}")
-                        raise ValueError("Gemini API did not return a JSON array as expected (List)")
+                        # 스키마 불일치 → 그룹(3개) 폴백
+                        return await _fallback_translate_in_groups(session, texts_to_translate, system_instruction, request_id)
 
                     # 입력과 출력 리스트 길이 비교
                     if len(translated_list) != len(texts_to_translate):
-                         return []
+                        logger.warning(f"[{request_id}] Gemini translated list length mismatch. input={len(texts_to_translate)} output={len(translated_list)}")
+                        # 길이 불일치 → 그룹(3개) 폴백
+                        return await _fallback_translate_in_groups(session, texts_to_translate, system_instruction, request_id)
 
                     logger.debug(f"[{request_id}] Gemini API 응답 수신 (List). 번역된 항목 수: {len(translated_list)}")
                     return translated_list
                 else:
                     logger.error(f"[{request_id}] Gemini API 응답 구조가 예상과 다릅니다 (List): {response_data}")
-                    if response_data.get("promptFeedback") and response_data["promptFeedback"].get("blockReason"):
-                        reason = response_data['promptFeedback']['blockReason']
-                        ratings = response_data['promptFeedback'].get('safetyRatings', 'N/A')
-                        logger.error(f"[{request_id}] Gemini API 요청 차단됨 (List): {reason}, 이유: {ratings}")
-                        raise ValueError(f"Gemini API request blocked (List): {reason}")
-                    raise ValueError("Unexpected Gemini API response structure (List)")
+                    # 응답 구조 불일치/차단 등 → 그룹(3개) 폴백 시도 (단, 폴백도 차단될 수 있음)
+                    return await _fallback_translate_in_groups(session, texts_to_translate, system_instruction, request_id)
 
+        # HTTP 계층에서 오류가 난 경우: 그룹(3개) 폴백으로 전환
         except aiohttp.ClientResponseError as e:
             logger.error(f"[{request_id}] Gemini API HTTP 에러 (List): {e.status} {e.message}. 응답: {response_text}")
-            try:
-                error_details = json.loads(response_text)
-                if error_details.get("error") and error_details["error"].get("message"):
-                    logger.error(f"[{request_id}] 상세 Gemini API 에러 (List): {error_details['error']['message']}")
-                    raise ValueError(f"Gemini API Error (List): {error_details['error']['message']}") from e
-            except json.JSONDecodeError:
-                pass
-            raise e
+            logger.info(f"[{request_id}] Falling back to group-of-3 translation due to HTTP error.")
+            return await _fallback_translate_in_groups(session, texts_to_translate, system_instruction, request_id)
+        # 네트워크/클라이언트 오류: 빈 배열 반환 (폴백 없음)
         except aiohttp.ClientError as e:
             logger.error(f"[{request_id}] Gemini API 호출 중 네트워크/클라이언트 에러 (List): {e}")
-            raise e
+            return []
+        # 기타 모든 예외: 빈 배열 반환 (폴백 없음)
         except Exception as e:
-             logger.error(f"[{request_id}] Gemini API 호출 중 예상치 못한 에러 (List): {e}", exc_info=True)
-             raise e
+            logger.error(f"[{request_id}] Gemini API 호출 중 예상치 못한 에러 (List): {e}", exc_info=True)
+            return []
 
 async def call_translation_api(texts: List[str], request_id: str) -> List[str]:
     """
@@ -293,7 +359,7 @@ async def process_and_save_translation(task_data: dict, image_url: str, result_c
                 translate_result_for_rendering = []
                 
                 if not translated_texts or len(translated_texts) != len(original_items_for_rendering):
-                    logger.debug(f"[{request_id}] 번역 실패 또는 길이 불일치. 인페인팅만 진행합니다. Original: {len(original_items_for_rendering)}, Translated: {len(translated_texts) if translated_texts else 0}")
+                    logger.warning(f"[{request_id}] 번역 실패 또는 길이 불일치. 인페인팅만 진행합니다. Original: {len(original_items_for_rendering)}, Translated: {len(translated_texts) if translated_texts else 0}")
                     # 번역 텍스트를 비워 인페인팅만 되도록 유도
                     for original_info in original_items_for_rendering:
                         translate_result_for_rendering.append({
@@ -304,14 +370,6 @@ async def process_and_save_translation(task_data: dict, image_url: str, result_c
                 else:
                     for original_info, translated_text in zip(original_items_for_rendering, translated_texts):
                         final_text = translated_text
-                        
-                        # 특정 단어가 포함된 경우 공백으로 전환
-                        filtered_words = ["품질보장", "무료반품", "a/s보장", "a/s","A/S","A/S보장"]
-                        for word in filtered_words:
-                            if word in translated_text:
-                                logger.debug(f'[{request_id}] 번역 결과에 필터링 대상 단어 "{word}"가 포함되어 제외합니다: "{translated_text}"')
-                                final_text = ""
-                                break
                         
                         if final_text and contains_chinese(translated_text):
                             logger.debug(f'[{request_id}] 번역 결과에 중국어가 포함되어 제외합니다: "{translated_text}"')
