@@ -83,10 +83,10 @@ async def _fallback_translate_in_groups(
     request_id: str,
 ) -> List[str]:
     """
-    배치 번역이 실패했을 때 고정 크기 그룹(기본 3개)으로 Gemini를 호출하는 폴백 루틴.
+    배치 번역이 실패했을 때 고정 크기 그룹(기본 2개)으로 Gemini를 호출하는 폴백 루틴.
 
     동작 원칙:
-    - 텍스트를 최대 3개 단위로 묶어 동일 JSON 배열 스키마로 요청/응답.
+    - 텍스트를 최대 2개 단위로 묶어 동일 JSON 배열 스키마로 요청/응답.
     - 각 그룹마다 `wait_for_rate_limit` 적용(RPS 준수).
     - 그룹 응답 파싱 실패/불일치 시 해당 그룹 범위를 빈 문자열로 채움.
 
@@ -102,8 +102,8 @@ async def _fallback_translate_in_groups(
     results: List[str] = []
     total = len(texts_to_translate)
     group_index = 0
-    for start in range(0, total, 3):
-        end = min(start + 3, total)
+    for start in range(0, total, 2):
+        end = min(start + 2, total)
         chunk = texts_to_translate[start:end]
         try:
             await wait_for_rate_limit(f"{request_id}:g{group_index}")
@@ -209,7 +209,7 @@ async def call_gemini_translate_list(texts_to_translate: List[str], request_id: 
                     response_data = json.loads(response_text)
                 except json.JSONDecodeError:
                     logger.error(f"[{request_id}] Gemini API JSON 응답 파싱 실패 (List). 응답: {response_text}")
-                    # 배치 파싱 실패 → 그룹(3개) 폴백
+                    # 배치 파싱 실패 → 그룹(2개) 폴백
                     return await _fallback_translate_in_groups(session, texts_to_translate, system_instruction, request_id)
 
                 # JSON 모드 응답 구조 파싱
@@ -225,41 +225,43 @@ async def call_gemini_translate_list(texts_to_translate: List[str], request_id: 
                         translated_list = json.loads(translated_list_json)
                     except json.JSONDecodeError:
                         logger.error(f"[{request_id}] Gemini API 반환 JSON 내부 파싱 실패 (List). 내부 JSON: {translated_list_json}")
-                        # 내부 JSON 파싱 실패 → 그룹(3개) 폴백
+                        # 내부 JSON 파싱 실패 → 그룹(2개) 폴백
                         return await _fallback_translate_in_groups(session, texts_to_translate, system_instruction, request_id)
 
                     # 반환된 것이 리스트인지 확인
                     if not isinstance(translated_list, list):
                         logger.error(f"[{request_id}] Gemini API가 JSON 배열을 반환하지 않음 (List). 반환값 타입: {type(translated_list)}")
-                        # 스키마 불일치 → 그룹(3개) 폴백
+                        # 스키마 불일치 → 그룹(2개) 폴백
                         return await _fallback_translate_in_groups(session, texts_to_translate, system_instruction, request_id)
 
                     # 입력과 출력 리스트 길이 비교
                     if len(translated_list) != len(texts_to_translate):
                         logger.warning(f"[{request_id}] Gemini translated list length mismatch. input={len(texts_to_translate)} output={len(translated_list)}")
-                        # 길이 불일치 → 그룹(3개) 폴백
+                        # 길이 불일치 → 그룹(2개) 폴백
                         return await _fallback_translate_in_groups(session, texts_to_translate, system_instruction, request_id)
 
                     logger.debug(f"[{request_id}] Gemini API 응답 수신 (List). 번역된 항목 수: {len(translated_list)}")
                     return translated_list
                 else:
                     logger.error(f"[{request_id}] Gemini API 응답 구조가 예상과 다릅니다 (List): {response_data}")
-                    # 응답 구조 불일치/차단 등 → 그룹(3개) 폴백 시도 (단, 폴백도 차단될 수 있음)
+                    # 응답 구조 불일치/차단 등 → 그룹(2개) 폴백 시도 (단, 폴백도 차단될 수 있음)
                     return await _fallback_translate_in_groups(session, texts_to_translate, system_instruction, request_id)
 
-        # HTTP 계층에서 오류가 난 경우: 그룹(3개) 폴백으로 전환
+        # HTTP 계층에서 오류가 난 경우: 그룹(2개) 폴백으로 전환
         except aiohttp.ClientResponseError as e:
             logger.error(f"[{request_id}] Gemini API HTTP 에러 (List): {e.status} {e.message}. 응답: {response_text}")
-            logger.info(f"[{request_id}] Falling back to group-of-3 translation due to HTTP error.")
+            logger.info(f"[{request_id}] Falling back to group-of-2 translation due to HTTP error.")
             return await _fallback_translate_in_groups(session, texts_to_translate, system_instruction, request_id)
-        # 네트워크/클라이언트 오류: 빈 배열 반환 (폴백 없음)
+        # 네트워크/클라이언트 오류: 그룹(2개) 폴백으로 전환
         except aiohttp.ClientError as e:
             logger.error(f"[{request_id}] Gemini API 호출 중 네트워크/클라이언트 에러 (List): {e}")
-            return []
-        # 기타 모든 예외: 빈 배열 반환 (폴백 없음)
+            logger.info(f"[{request_id}] Falling back to group-of-2 translation due to network/client error.")
+            return await _fallback_translate_in_groups(session, texts_to_translate, system_instruction, request_id)
+        # 기타 모든 예외: 그룹(2개) 폴백으로 전환
         except Exception as e:
             logger.error(f"[{request_id}] Gemini API 호출 중 예상치 못한 에러 (List): {e}", exc_info=True)
-            return []
+            logger.info(f"[{request_id}] Falling back to group-of-2 translation due to unexpected error.")
+            return await _fallback_translate_in_groups(session, texts_to_translate, system_instruction, request_id)
 
 async def call_translation_api(texts: List[str], request_id: str) -> List[str]:
     """
