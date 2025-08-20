@@ -11,7 +11,7 @@ from PIL import Image, ImageFile
 # config import 추가
 import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from core.config import OCR_DET_MODEL_DIR, OCR_REC_MODEL_DIR, OCR_SHOW_LOG
+from core.config import OCR_SHOW_LOG
 
 # 잘린 이미지 파일도 로드할 수 있도록 허용
 ImageFile.LOAD_TRUNCATED_IMAGES = True
@@ -47,39 +47,18 @@ class OcrProcessor:
         logger.info("PaddleOCR model initialized successfully.")
 
     def _load_model_sync(self):
-        """[동기] PaddleOCR 모델을 로드하는 내부 함수."""
+        """[동기] PaddleOCR 모델을 로드하는 내부 함수 (PaddleOCR v3.x 호환)."""
         try:
-            # 모델 디렉토리 설정 (config에서 가져옴)
-            det_model_dir = OCR_DET_MODEL_DIR
-            rec_model_dir = OCR_REC_MODEL_DIR
-            
-            # 디렉토리가 없으면 생성
-            os.makedirs(det_model_dir, exist_ok=True)
-            os.makedirs(rec_model_dir, exist_ok=True)
-            
+            # v3.x API: 디바이스와 문서 처리 부가 모델 비활성화, v5 서버 모델 사용
+            # 모델 디렉토리 수동 지정 대신, 모델 이름으로 로드
             self.ocr_model = PaddleOCR(
-                det_algorithm="DB",
-                det_model_dir=det_model_dir,
-                det_max_side_len=1504,
-                det_db_thresh=0.3,
-                det_db_box_thresh=0.5,
-                det_db_unclip_ratio=2.0,
-                use_dilation=False,
-                rec_algorithm="SVTR_LCNet",
-                rec_model_dir=rec_model_dir,
-                rec_image_shape='3, 64, 480',
-                rec_char_type='ch',
-                max_text_length=25,
-                use_space_char=True,
-                drop_score=0.5,
-                lang="ch",
-                use_angle_cls=True,
-                use_gpu=True,
-                use_fp16=True,
-                show_log=OCR_SHOW_LOG,  # config에서 설정
-                gpu_mem=1000,
-                precision='fp32',
-                max_batch_size=10
+                device="gpu:0",
+                use_doc_orientation_classify=False,
+                use_doc_unwarping=False,
+                use_textline_orientation=False,
+                text_detection_model_name="PP-OCRv5_server_det",
+                text_recognition_model_name="PP-OCRv5_server_rec",
+                text_rec_score_thresh=0.85,
             )
         except Exception as e:
             logger.error(f"Failed to load PaddleOCR model: {e}", exc_info=True)
@@ -109,28 +88,69 @@ class OcrProcessor:
             raise
 
     def _run_ocr_sync(self, img_array: np.ndarray) -> list:
-        """[동기] NumPy 배열에 대해 OCR을 실행하고, 결과를 애플리케이션 포맷에 맞게 변환합니다."""
+        """[동기] NumPy 배열에 대해 OCR을 실행하고, 결과를 [[box], [text, score]] 리스트로 변환합니다.
+
+        PaddleOCR v3.x의 predict API만 사용합니다. 예외는 상위로 전파합니다.
+        """
         if self.ocr_model is None:
             raise RuntimeError("OCR model is not initialized.")
-        
-        # 1. PaddleOCR 실행 (결과는 [box, (text, score)] 튜플 포함)
-        raw_result = self.ocr_model.ocr(img_array, True)
 
-        if raw_result is None or not raw_result or raw_result[0] is None:
+        pages = self.ocr_model.predict(img_array)
+        if not pages:
             return []
-        
-        # PaddleOCR v4는 결과 리스트를 한 번 더 감쌀 수 있으므로 내부 리스트를 추출
-        result_list = raw_result[0] if isinstance(raw_result[0], list) and isinstance(raw_result[0][0], list) else raw_result
-        
-        # 2. (text, score) 튜플을 [text, score] 리스트로 변환 (중요!)
-        # 기존 JSON 직렬화/역직렬화 과정에서 발생했던 암시적 변환을 명시적으로 재현합니다.
-        processed_result = []
-        for line in result_list:
-            # line[1]이 (text, score) 튜플인 경우, 이를 list로 변환합니다.
-            if isinstance(line, list) and len(line) == 2 and isinstance(line[1], tuple):
-                line[1] = list(line[1])
-            processed_result.append(line)
 
+        page = pages[0]
+
+        # 정답: page 자체에서 필드 추출 (res 없이 직접 보유)
+        parse_path = "page"
+        res_candidate = page
+
+        def pick(container, key):
+            if container is None:
+                return None
+            if isinstance(container, dict):
+                return container.get(key)
+            return getattr(container, key, None)
+
+        rec_texts = pick(res_candidate, "rec_texts") or pick(page, "rec_texts") or []
+        rec_scores = pick(res_candidate, "rec_scores") or pick(page, "rec_scores") or []
+        rec_polys = pick(res_candidate, "rec_polys") or pick(page, "rec_polys") or []
+
+        # numpy → list 변환 보정
+        def to_list_safe(val):
+            try:
+                if isinstance(val, np.ndarray):
+                    return val.tolist()
+            except Exception:
+                pass
+            return val
+
+        rec_texts = to_list_safe(rec_texts)
+        rec_scores = to_list_safe(rec_scores)
+        rec_polys = to_list_safe(rec_polys)
+
+        # 수집된 경로/타입/길이 로깅
+        try:
+            logger.debug(
+                "predict parse mode=%s; types: texts=%s scores=%s polys=%s; lens: t=%s s=%s p=%s",
+                parse_path,
+                type(rec_texts).__name__, type(rec_scores).__name__, type(rec_polys).__name__,
+                (len(rec_texts) if hasattr(rec_texts, "__len__") else "-"),
+                (len(rec_scores) if hasattr(rec_scores, "__len__") else "-"),
+                (len(rec_polys) if hasattr(rec_polys, "__len__") else "-")
+            )
+        except Exception:
+            pass
+
+        if not (len(rec_texts) == len(rec_scores) == len(rec_polys)):
+            logger.warning(
+                "Predict result length mismatch: texts=%d scores=%d polys=%d",
+                len(rec_texts), len(rec_scores), len(rec_polys)
+            )
+
+        processed_result = []
+        for poly, text, score in zip(rec_polys, rec_texts, rec_scores):
+            processed_result.append([to_list_safe(poly), [str(text), float(score)]])
         return processed_result
 
     async def process_image(self, image_bytes: bytes, image_id: str, request_id: str) -> list:

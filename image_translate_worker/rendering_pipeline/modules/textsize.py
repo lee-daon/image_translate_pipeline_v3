@@ -106,8 +106,8 @@ class TextSizeCalculator:
                 width = np.max(x_coords) - np.min(x_coords)
                 height = np.max(y_coords) - np.min(y_coords)
             
-            # 너비를 90%로 줄여 텍스트 겹침 방지
-            width *= 0.9
+            # 너비를 95%로 줄여 텍스트 겹침 방지
+            # width *= 0.95
 
             # 너비 또는 높이가 0 이하인 경우 경고 로깅
             if width <= 0 or height <= 0:

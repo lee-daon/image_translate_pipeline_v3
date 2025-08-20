@@ -1,10 +1,10 @@
 # 1. 베이스 이미지로 NVIDIA CUDA 12.3.2, cuDNN 9 런타임 이미지를 선택합니다.
-FROM nvidia/cuda:12.3.2-cudnn9-runtime-ubuntu22.04
+FROM nvidia/cuda:12.6.2-cudnn-runtime-ubuntu22.04
 
 # 2. 시스템 의존성 및 Python 설치
 RUN apt-get update && \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-    python3 python3-pip libgl1-mesa-glx libglib2.0-0 libgomp1 && \
+    python3 python3-pip libgl1 libglib2.0-0 libsm6 libxext6 libxrender1 libgomp1 && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # 3. 작업 디렉토리 설정
@@ -17,8 +17,11 @@ RUN python3 -m pip install --no-cache-dir --upgrade pip && \
     python3 -m pip install \
         --no-cache-dir \
         --ignore-installed \
-        -r base_requirements.txt \
-        --extra-index-url https://www.paddlepaddle.org.cn/packages/stable/cu126/
+        -r base_requirements.txt
+
+RUN python3 -m pip install paddlepaddle-gpu==3.1.1 -i https://www.paddlepaddle.org.cn/packages/stable/cu126/
+# PaddleOCR + PaddleX 설치 (호환 버전 명시)
+RUN python3 -m pip install --no-cache-dir paddlex==3.1.2 paddleocr==3.1.0
 
 # 5. 필요한 모든 모듈 복사
 COPY inpainting_pipeline /app/inpainting_pipeline
