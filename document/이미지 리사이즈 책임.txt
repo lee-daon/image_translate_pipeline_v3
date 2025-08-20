@@ -2,7 +2,7 @@
 
 ## 📋 요구사항
 - **Short 타입**: 1000x1000px 최종 출력
-- **Long 타입**: 가로 864px (비율 유지) 최종 출력
+- **Long 타입**: 원본 크기대로
 
 ## 🔄 현재 파이프라인 (3단계 리사이즈)
 
@@ -17,26 +17,30 @@ OCR 좌표(원본) → 전처리(GPU용 크기) → 후처리(원본 복원) →
 2. **후처리**: GPU 결과 → 원본 크기 복원 (OCR 좌표 매칭용)
 3. **렌더링**: 원본 → 최종 출력 크기 + 텍스트 좌표 스케일링
 
-## ⚠️ 핵심 제약사항
+##  핵심 제약사항
 **텍스트 좌표는 원본 크기 기준** → 이미지 리사이즈와 좌표 스케일링이 **동시에** 발생해야 함
 
-## ✅ 해결 완료
-**`rendering.py` 수정으로 long 타입 처리 추가**
+##  해결 완료
+**`rendering.py` 기준으로 최종 규칙 반영**
 
 ```python
+# 1) 인페인팅 결과가 원본과 다르면 우선 원본 크기로 보정
+if inpainted_image.shape != original_image.shape:
+    original_h, original_w = original_image.shape[:2]
+    inpainted_image = cv2.resize(inpainted_image, (original_w, original_h), interpolation=cv2.INTER_AREA)
+
+# 2) 최종 출력 규칙
 if not is_long:
-    # Short: 1024x1024 (기존)
-    rendered_image = cv2.resize(inpainted_image, (1024, 1024))
+    # Short: 설정된 타깃 크기(기본 1024x1024)로 리사이즈
+    target_h, target_w = RESIZE_TARGET_SIZE
+    rendered_image = cv2.resize(inpainted_image, (target_w, target_h), interpolation=cv2.INTER_AREA)
 else:
-    # Long: 가로 864px, 비율 유지 (신규 추가)
-    target_w = 864
-    scale = target_w / original_w
-    target_h = int(original_h * scale)
-    rendered_image = cv2.resize(inpainted_image, (target_w, target_h))
+    # Long: 원본 크기 그대로 반환
+    rendered_image = inpainted_image
 ```
 
 ## 🎯 현재 상태
-- **Short**: 1024x1024px 출력 (요구사항 1000x1000과 24px 차이)
-- **Long**: 가로 864px 출력 ✅ 완료
+- **Short**: 기본 1024x1024px 출력 (요구 사항이 1000x1000이면 설정으로 조정 가능)
+- **Long**: 원본 크기 그대로 출력 
 
-**Short를 1000x1000으로 변경하려면**: `config.py`에서 `RESIZE_TARGET_SIZE = (1000, 1000)` 수정
+**Short를 1000x1000으로 변경하려면**: `image_translate_worker/core/config.py`에서 `RESIZE_TARGET_SIZE = (1000, 1000)`로 설정
