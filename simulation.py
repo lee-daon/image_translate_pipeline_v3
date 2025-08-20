@@ -14,29 +14,15 @@ SHORT_IMAGE_URLS = [
 
 # 이미지 URL 목록 (is_long=true)
 LONG_IMAGE_URLS = [
-    "https://image.loopton.com/raw_image/2025-07/26/image_1753555649334_710qaw.png",
-    "https://image.loopton.com/raw_image/2025-07/26/image_1753555649288_pogum7.png",
-    "https://image.loopton.com/raw_image/2025-07/26/image_1753555649644_yb0g2z.png",
-    "https://image.loopton.com/raw_image/2025-07/26/image_1753555650042_q132te.jpg",
-    "https://image.loopton.com/raw_image/2025-07/26/image_1753555650086_su8whi.jpg",
-    "https://image.loopton.com/raw_image/2025-07/26/image_1753555650100_f6gcxw.jpg",
-    "https://image.loopton.com/raw_image/2025-07/26/image_1753555650522_9y0qr6.png",
-    "https://image.loopton.com/raw_image/2025-07/26/image_1753555651015_p5o60b.jpg",
-    "https://image.loopton.com/raw_image/2025-07/26/image_1753555651165_mrvgnm.png",
-    "https://image.loopton.com/raw_image/2025-07/26/image_1753555651256_p0o69g.png",
-    "https://image.loopton.com/raw_image/2025-07/26/image_1753555651614_gd0eaa.png",
-    "https://image.loopton.com/raw_image/2025-07/26/image_1753555651600_kw552e.png",
-    "https://image.loopton.com/raw_image/2025-07/26/image_1753555651892_7c6dd8.png",
-    "https://image.loopton.com/raw_image/2025-07/26/image_1753555652454_ig19d2.png",
-    "https://image.loopton.com/raw_image/2025-07/26/image_1753555652211_qf7kh9.png",
-    "https://image.loopton.com/raw_image/2025-07/26/image_1753555652353_z9kuk3.png",
-    "https://image.loopton.com/raw_image/2025-07/26/image_1753555652419_ugyjlm.png",
-    "https://image.loopton.com/raw_image/2025-07/26/image_1753555652788_cf1zin.png",
-    "https://image.loopton.com/raw_image/2025-07/26/image_1753555652883_w55n5g.png",
-    "https://image.loopton.com/raw_image/2025-07/26/image_1753555652953_qny8kq.png",
-    "https://image.loopton.com/raw_image/2025-07/26/image_1753555654205_5793mx.jpg",
-    "https://image.loopton.com/raw_image/2025-07/26/image_1753555653542_t4qi1s.png",
-    "https://image.loopton.com/raw_image/2025-07/26/image_1753560601204_d4w84f.jpg"
+    "https://dev.loopton.com/hard/O1CN017mE61j2IkuNj4mf33_!!2219819325.jpg",
+    "https://dev.loopton.com/hard/O1CN01H6M52J1DS3YRJ04hS_!!4096610214.jpg",
+    "https://dev.loopton.com/hard/O1CN01LvSgQ51Y1arirqUgN_!!2686182999.jpg",
+    "https://dev.loopton.com/hard/O1CN01QOl2NL1DS3gyMtVrO_!!0-item_pic.jpg",
+    "https://dev.loopton.com/hard/O1CN01lO1hsf2HsPGMPOLQ2_!!4611686018427382134-2-item_pic.png",
+    "https://dev.loopton.com/O1CN01q9cNAz1IvthLuOYRC_!!3993520956.jpg",
+    "https://dev.loopton.com/O1CN01rOlVaa25Ae0qd2D5y_!!909007486.jpg",
+    "https://dev.loopton.com/O1CN01noT7Ru1nRtjw0LNoR_!!2310955087.jpg",
+    "https://dev.loopton.com/O1CN01hD5NrI1nRtjyyV5Z3_!!2310955087.jpg",
 ]
 
 async def send_ocr_task(redis_client, image_url: str, is_long: bool):
