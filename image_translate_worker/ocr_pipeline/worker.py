@@ -51,14 +51,21 @@ class OcrProcessor:
         try:
             # v3.x API: 디바이스와 문서 처리 부가 모델 비활성화, v5 서버 모델 사용
             # 모델 디렉토리 수동 지정 대신, 모델 이름으로 로드
+            base_dir = os.path.dirname(os.path.abspath(__file__))
+            det_dir = os.path.join(base_dir, "modeles", "PP-OCRv5_server_det")
+            rec_dir = os.path.join(base_dir, "modeles", "PP-OCRv5_server_rec")
+
             self.ocr_model = PaddleOCR(
                 device="gpu:0",
                 use_doc_orientation_classify=False,
                 use_doc_unwarping=False,
                 use_textline_orientation=False,
+                text_detection_model_dir=det_dir,
+                text_recognition_model_dir=rec_dir,
+                text_rec_score_thresh=0.85,
                 text_detection_model_name="PP-OCRv5_server_det",
                 text_recognition_model_name="PP-OCRv5_server_rec",
-                text_rec_score_thresh=0.85,
+                lang="ch",
             )
         except Exception as e:
             logger.error(f"Failed to load PaddleOCR model: {e}", exc_info=True)
